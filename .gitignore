@@ -1,0 +1,8 @@
+# ignore files
+*.user
+
+# ignore folders
+win32/
+.vs/
+obj/
+bin/
