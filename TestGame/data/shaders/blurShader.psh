@@ -1,0 +1,44 @@
+////////////////////////////////////////////////////////////////////////////////////////
+/*
+	Pixel shader to apply a 4 sample gausian blur
+	Copyright 2013 Frank Force - http://www.frankforce.com
+*/
+////////////////////////////////////////////////////////////////////////////////////////
+
+// Pixel shader input structure
+struct PS_INPUT
+{
+	float2 textCoord	: TEXCOORD0;
+};
+
+// Pixel shader output structures
+struct PS_OUTPUT
+{
+	float4 color	: COLOR0;
+};
+
+SamplerState shaderSampler
+{
+	Filter = MIN_MAG_MIP_LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+// Global variables
+float blurSize;					// how big is the blur
+float blurBrightness;			// how bright is the blur
+Texture2D shaderTextures[1];	// normal map and shadow map
+
+PS_OUTPUT ps_main( in PS_INPUT In )
+{
+	const float colorScale = blurBrightness * 0.25f;
+
+	// modulate with shadow map and light color
+	PS_OUTPUT Out;
+	Out.color = float4(0, 0, 0, 0);
+	Out.color += colorScale*tex2D(shaderSampler, In.textCoord + float2(0, blurSize));
+	Out.color += colorScale*tex2D(shaderSampler, In.textCoord + float2(0, -blurSize));
+	Out.color += colorScale*tex2D(shaderSampler, In.textCoord + float2(blurSize, 0));
+	Out.color += colorScale*tex2D(shaderSampler, In.textCoord + float2(-blurSize, 0));
+	return Out;
+}

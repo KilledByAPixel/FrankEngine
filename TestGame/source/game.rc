@@ -1,0 +1,75 @@
+/////////////////////////////////////////////////////////////////////////////
+//
+// Frank Engine Resource Script
+//
+/////////////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Game files
+//
+/////////////////////////////////////////////////////////////////////////////
+ 
+// engine textures
+smoke						RCDATA		"data\\smoke.png"
+smoke_n						RCDATA		"data\\smoke_n.jpg"
+circle						RCDATA		"data\\circle.png"
+circle_n					RCDATA		"data\\circle_n.jpg"
+dot							RCDATA		"data\\dot.png"
+lightMask					RCDATA		"data\\lightMask.png"
+lightGel0					RCDATA		"data\\lightGel0.png"
+
+// sounds
+sound_test					WAVE		"data\\sound\\sound_test.wav"
+
+// terrain tiles
+tile_test1					RCDATA		"data\\terrain\\tile_test1.jpg"
+tile_test1_n				RCDATA		"data\\terrain\\tile_test1_n.jpg"
+tile_test1_s				RCDATA		"data\\terrain\\tile_test1_s.jpg"
+tile_test2					RCDATA		"data\\terrain\\tile_test2.jpg"
+tile_test2_n				RCDATA		"data\\terrain\\tile_test2_n.jpg"
+tile_test3					RCDATA		"data\\terrain\\tile_test3.jpg"
+tile_test3_n				RCDATA		"data\\terrain\\tile_test3_n.jpg"
+
+// tile sheets
+tiles0						RCDATA		"data\\tiles0.png"
+tiles0_n					RCDATA		"data\\tiles0_n.png"
+tiles0_s					RCDATA		"data\\tiles0_s.png"
+tiles0_e					RCDATA		"data\\tiles0_e.png"
+terrain0					RCDATA		"data\\terrain0.png"
+terrain0_n					RCDATA		"data\\terrain0_n.png"
+terrain0_s					RCDATA		"data\\terrain0_s.png"
+terrain0_e					RCDATA		"data\\terrain0_e.png"
+
+// fonts
+font1						RCDATA		"data\\font1.png"
+font1.fnt					RCDATA		"data\\font1.fnt"
+
+// terrain
+terrain.2dt					RCDATA		"terrain.2dt"
+ 
+// pixel shaders
+normalMapShader.psh			RCDATA		"data\\shaders\\normalMapShader.psh"
+deferredLightShader.psh		RCDATA		"data\\shaders\\deferredLightShader.psh"
+directionalLightShader.psh	RCDATA		"data\\shaders\\directionalLightShader.psh"
+blurShader.psh				RCDATA		"data\\shaders\\blurShader.psh"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icons
+//
+/////////////////////////////////////////////////////////////////////////////
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_MAIN_ICON			ICON		"data\\game.ico"
+IDI_MAIN_ICON_SMALL		ICON		"data\\gameSmall.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Manifest
+//
+/////////////////////////////////////////////////////////////////////////////
+
+1	RT_MANIFEST		"Game.manifest"
+

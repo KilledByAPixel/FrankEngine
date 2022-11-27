@@ -1,0 +1,70 @@
+////////////////////////////////////////////////////////////////////////////////////////
+/*
+	Pixel shader to apply a background shadow map to a normal map
+	Copyright 2013 Frank Force - http://www.frankforce.com
+*/
+///////////////////////////////////////////////////////////////////////////////////////
+
+// Pixel shader input structure
+struct PS_INPUT
+{
+	float4 Texture	: TEXCOORD0;
+};
+
+// Pixel shader output structure
+struct PS_OUTPUT
+{
+	float4 Color	: COLOR0;
+};
+
+SamplerState shaderSampler
+{
+	Filter = MIN_MAG_MIP_LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+// Global variables
+float4 lightDirection;			// light direction used for normal mapping
+float4 lightColor;				// diffuse light color
+float4x4 normalMatrix;			// matrix to map normal map coords
+Texture2D shaderTextures[3];	// normal map and shadow map
+
+float specularPower;
+float specularHeight;
+float specularAmount;
+
+PS_OUTPUT ps_main( in PS_INPUT In )
+{
+	// get the normal map coordinates
+	float4 normalCoords = In.Texture;
+	normalCoords.z = 1;
+	normalCoords.w = 1;
+	normalCoords = mul(normalCoords, normalMatrix);
+
+	// get the normal
+	float3 normal = shaderTextures[0].Sample(shaderSampler, normalCoords);
+	normal = 2 * normal - 1;
+	normal = normalize(normal);
+	
+	// calculate lighting using a dot product
+	float brightness = saturate(dot(normal, lightDirection));
+	
+	// calculate reflection vector
+	float3 reflection = normalize(2 * brightness * normal - lightDirection); 
+	
+	// calculate specular contribution
+	float3 viewDirection = float3(0.5f, 0.5f, 0) - normalCoords;
+	viewDirection.z = specularHeight;
+	viewDirection = normalize(viewDirection);
+	float3 specularIntensity = shaderTextures[1].Sample(shaderSampler, normalCoords);
+	float specular = specularIntensity * pow(saturate(dot(reflection, viewDirection)), specularPower);
+
+	// get the shadow map color
+	float4 shadowMapColor = shaderTextures[2].Sample(shaderSampler, In.Texture);
+
+	// modulate with shadow map and light color
+	PS_OUTPUT Out;
+	Out.Color = (brightness + specularAmount * specular) * shadowMapColor * lightColor;
+	return Out;
+}

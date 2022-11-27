@@ -1,0 +1,84 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{2a40b513-0b16-45c2-b601-a613cf5bc291}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Game Objects">
+      <UniqueIdentifier>{c8ff472c-52d9-42ef-96d4-9852436eb7f3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{d6f42ded-4e17-4120-beaf-c43d9026b131}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="source\game.cpp" />
+    <ClCompile Include="source\gameGlobals.cpp" />
+    <ClCompile Include="source\gameGUI.cpp" />
+    <ClCompile Include="source\objects\gameObjects.cpp">
+      <Filter>Game Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="source\gameControl.cpp" />
+    <ClCompile Include="source\objects\weapons.cpp">
+      <Filter>Game Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="source\objects\enemies.cpp">
+      <Filter>Game Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="source\objects\player.cpp">
+      <Filter>Game Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="source\objects\gameCamera.cpp">
+      <Filter>Game Objects</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="source\gameGlobals.h" />
+    <ClInclude Include="source\gameGUI.h" />
+    <ClInclude Include="source\objects\gameObjects.h">
+      <Filter>Game Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="source\gameControl.h" />
+    <ClInclude Include="source\objects\player.h">
+      <Filter>Game Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="source\objects\weapons.h">
+      <Filter>Game Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="source\objects\enemies.h">
+      <Filter>Game Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="source\objects\gameCamera.h">
+      <Filter>Game Objects</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="data\game.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="game.txt" />
+    <None Include="autoexec.cfg" />
+    <None Include="data\shaders\normalMapShader.psh">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\shaders\blurShader.psh">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\shaders\deferredLightShader.psh">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="data\shaders\directionalLightShader.psh">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="source\game.manifest">
+      <Filter>Resource Files</Filter>
+    </Manifest>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="source\game.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

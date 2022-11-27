@@ -101,7 +101,3 @@ Example music
 	Air on the G String
 	Performed by The United States Air Force Band
 	http://en.wikipedia.org/wiki/File:Air.ogg
-	
-------------------------------------------------------------------------------
-
-See licenses folder for more license information.

@@ -1,0 +1,212 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{2a40b513-0b16-45c2-b601-a613cf5bc291}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tests">
+      <UniqueIdentifier>{7803cf4f-3721-4807-a3a7-cc96825b9ec5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="source\game.cpp" />
+    <ClCompile Include="source\gameGlobals.cpp" />
+    <ClCompile Include="source\gameGUI.cpp" />
+    <ClCompile Include="source\gameControl.cpp" />
+    <ClCompile Include="source\Test.cpp" />
+    <ClCompile Include="source\Tests\TestEntries.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="source\gameGlobals.h" />
+    <ClInclude Include="source\gameGUI.h" />
+    <ClInclude Include="source\gameControl.h" />
+    <ClInclude Include="source\Tests\Pinball.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Test.h" />
+    <ClInclude Include="source\Tests\HeavyOnLight.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\HeavyOnLightTwo.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Mobile.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\MobileBalanced.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\MotorJoint.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\OneSidedPlatform.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\PolyCollision.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\PolyShapes.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Prismatic.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Pulleys.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Pyramid.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\RayCast.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Revolute.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Rope.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\RopeJoint.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\SensorTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ShapeCast.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ShapeEditing.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Skier.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\SliderCrank.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\SphereStack.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\TheoJansen.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Tiles.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\TimeOfImpact.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Tumbler.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\VaryingFriction.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\VaryingRestitution.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\VerticalStack.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Web.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\AddPair.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ApplyForce.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\BasicSliderCrank.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\BodyTypes.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Breakable.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Bridge.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\BulletTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Cantilever.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Car.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Chain.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\chainProblem.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\CharacterCollision.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\CollisionFiltering.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\CollisionProcessing.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\CompoundShapes.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Confined.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ContinuousTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ConvexHull.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\ConveyorBelt.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\DistanceTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Dominos.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\DumpShell.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\DynamicTreeTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\EdgeShapes.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\EdgeTest.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="source\Tests\Gears.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="data\game.ico">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="game.txt" />
+    <None Include="autoexec.cfg" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="source\game.manifest">
+      <Filter>Resource Files</Filter>
+    </Manifest>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="source\game.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>

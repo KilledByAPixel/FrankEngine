@@ -1,0 +1,10 @@
+
+The Frank Engine
+Copyright 2013 Frank Force
+http://www.frankforce.com
+
+This file is a place to keep notes and todo list to help manage the project.
+
+================================================================================
+
+notes moved to trello: https://trello.com/b/c0EiTbuN/frank-engine

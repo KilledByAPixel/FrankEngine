@@ -1,0 +1,314 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="DXUT">
+      <UniqueIdentifier>{fe8c99c1-79ed-4285-9c40-8267f9467c8d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core">
+      <UniqueIdentifier>{2202e689-54c0-45b2-8ffd-45cd0d111421}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Terrain">
+      <UniqueIdentifier>{28bb4719-f453-437a-a3ce-b24480ac9bcd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Objects">
+      <UniqueIdentifier>{9af5500a-8fb3-4bbb-8e59-da84ad569bd0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Physics">
+      <UniqueIdentifier>{7cc53d2e-2728-462e-87d4-94613c078e01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Rendering">
+      <UniqueIdentifier>{84635fff-2d49-42a2-9c30-d459d2ecbd62}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Sound">
+      <UniqueIdentifier>{3bb3d495-37e6-46a1-aa85-fea8c9c235a5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Debug">
+      <UniqueIdentifier>{981bb958-b092-40cc-9966-b09c33edc34c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Editor">
+      <UniqueIdentifier>{e1c00e66-b1cc-47b5-ac4f-e97753c9b558}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="DXUT\Core\DXUT.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Core\DXUTenum.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Optional\DXUTgui.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Core\DXUTmisc.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Optional\DXUTres.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Optional\SDKmisc.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Optional\SDKsound.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="DXUT\Optional\SDKwavefile.cpp">
+      <Filter>DXUT</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\frankMath.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\gameObject.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\gameObjectBuilder.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Rendering\frankRender.cpp">
+      <Filter>Rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\frankEngine.cpp" />
+    <ClCompile Include="Source\gameControlBase.cpp" />
+    <ClCompile Include="Source\Rendering\frankFont.cpp">
+      <Filter>Rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\particleSystem.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\actor.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\weapon.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\projectile.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Physics\physicsRender.cpp">
+      <Filter>Physics</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Physics\physics.cpp">
+      <Filter>Physics</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\objectEditor.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\tileEditor.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Editor\editor.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\camera.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\light.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Terrain\terrainTile.cpp">
+      <Filter>Terrain</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Terrain\terrain.cpp">
+      <Filter>Terrain</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Terrain\terrainRender.cpp">
+      <Filter>Terrain</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Terrain\terrainSurface.cpp">
+      <Filter>Terrain</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\frankUtil.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Sound\soundControl.cpp">
+      <Filter>Sound</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Sound\musicControl.cpp">
+      <Filter>Sound</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\inputControl.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\gameObjectManager.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Rendering\deferredRender.cpp">
+      <Filter>Rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\debugConsole.cpp">
+      <Filter>Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\debugMessage.cpp">
+      <Filter>Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\perlinNoise.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\frankProfiler.cpp">
+      <Filter>Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Gui\guiBase.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Gui\editorGui.cpp">
+      <Filter>Editor</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Rendering\miniMap.cpp">
+      <Filter>Rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Objects\basicObjects.cpp">
+      <Filter>Objects</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\pathFindingBase.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Rendering\frankDebugRender.cpp">
+      <Filter>Debug</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="DXUT\Core\DXUT.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Core\DXUTenum.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Optional\DXUTgui.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Core\DXUTmisc.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Optional\DXUTres.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Optional\SDKmisc.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Optional\SDKsound.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="DXUT\Optional\SDKwavefile.h">
+      <Filter>DXUT</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\frankMath.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\gameObject.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\gameObjectBuilder.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Rendering\frankRender.h">
+      <Filter>Rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\frankEngine.h" />
+    <ClInclude Include="Source\gameControlBase.h" />
+    <ClInclude Include="Source\Rendering\frankFont.h">
+      <Filter>Rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\actor.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\weapon.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\projectile.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Physics\physicsRender.h">
+      <Filter>Physics</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Physics\physics.h">
+      <Filter>Physics</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\objectEditor.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\tileEditor.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Editor\editor.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\camera.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\light.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Terrain\terrainSurface.h">
+      <Filter>Terrain</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Terrain\terrainTile.h">
+      <Filter>Terrain</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Terrain\terrain.h">
+      <Filter>Terrain</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Terrain\terrainRender.h">
+      <Filter>Terrain</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\particleSystem.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\frankUtil.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Sound\soundControl.h">
+      <Filter>Sound</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Sound\musicControl.h">
+      <Filter>Sound</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\inputControl.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\gameObjectManager.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Rendering\deferredRender.h">
+      <Filter>Rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\debugConsole.h">
+      <Filter>Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\debugMessage.h">
+      <Filter>Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\perlinNoise.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\frankProfiler.h">
+      <Filter>Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Gui\guiBase.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Gui\editorGui.h">
+      <Filter>Editor</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Rendering\miniMap.h">
+      <Filter>Rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Objects\basicObjects.h">
+      <Filter>Objects</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\pathFindingBase.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Rendering\frankDebugRender.h">
+      <Filter>Debug</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Core\frankMath.inl">
+      <Filter>Core</Filter>
+    </None>
+    <None Include="..\readme.txt" />
+    <None Include="notes.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\license\FrankEngine - License.txt" />
+  </ItemGroup>
+</Project>

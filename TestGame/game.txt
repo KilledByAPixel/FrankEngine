@@ -1,0 +1,30 @@
+Test Game for Frank Engine
+Copyright 2013 Frank Force
+
+The goal of the "Test Game" project is to keep the code as simple as
+possible to provide a clean slate for starting a fresh project.  It also just
+helps provide an understanding of what is necessary to set up a game and
+serves as an example of some of the basic functionality.
+
+If you want to start a new project as a copy of this project just export
+or branch the TestGame folder to a new folder for your project, and rename 
+TestGame.vcxproj and TestGame.vcxproj.filters to your project name.
+Then add your new project to the solution and it should just work.
+ 
+================================================================================
+
+Brick texture is from Spiral Graphics free texture packs
+http://www.spiralgraphics.biz/packs/index.htm
+
+Rock texture is from a DirectX normal mapping example
+http://www.dhpoware.com/demos/d3d9NormalMapping.html
+
+Crate texture from a Tutorial by Nige Copeland
+http://www.davidhier.co.uk/Tutorials/normals.html
+
+Sound effects were generated with SFXR
+http://www.drpetter.se/project_sfxr.html
+
+Test music is "Air on the G String" by J.S. Bach
+Preformed by The United States Air Force Band
+http://commons.wikimedia.org/wiki/File:Air.ogg

@@ -1,0 +1,53 @@
+////////////////////////////////////////////////////////////////////////////////////////
+/*
+	Pixel shader to convert normals to world space
+	Copyright 2013 Frank Force - http://www.frankforce.com
+*/
+///////////////////////////////////////////////////////////////////////////////////////
+
+// Pixel shader input structure
+struct PS_INPUT
+{
+	float4 Texture	: TEXCOORD0;
+};
+
+// Pixel shader output structure
+struct PS_OUTPUT
+{
+	float4 Color	: COLOR0;
+};
+
+SamplerState shaderSampler
+{
+	Filter = MIN_MAG_MIP_LINEAR;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+// Global variables
+float4x4 transformMatrix;		// local to world normals transform
+float4 diffuseColor;			// diffuse color
+Texture2D shaderTextures[2];	// normal map and shadow map
+float diffuseNormalAlphaPercent;
+
+PS_OUTPUT ps_main( in PS_INPUT In )
+{
+	PS_OUTPUT Out;
+
+	// apply world space normal transform
+	float4 normal = shaderTextures[1].Sample(shaderSampler, In.Texture);
+	normal = 2 * normal - 1;
+	normal = mul(normal, transformMatrix);
+	normal = 0.5f + 0.5f * normal;
+	Out.Color = saturate(normal);
+	
+	// modulate in the diffuse texture alpha
+	float alpha = shaderTextures[0].Sample(shaderSampler, In.Texture).w;
+	alpha = 1 - (1 - alpha)*diffuseNormalAlphaPercent;
+	Out.Color.w *= alpha;
+
+	// modulate in the diffuse color
+	Out.Color *= diffuseColor;
+
+	return Out;
+}
