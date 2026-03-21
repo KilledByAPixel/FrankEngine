@@ -1542,9 +1542,16 @@ LRESULT CALLBACK DXUTStaticWndProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
             break;
 
        case WM_ACTIVATEAPP:
-            if( wParam == TRUE && !DXUTIsActive() ) // Handle only if previously not active 
+            if( wParam == TRUE && !DXUTIsActive() ) // Handle only if previously not active
             {
                 GetDXUTState().SetActive( true );
+
+                // Clear stale key states from before focus loss — key-up messages
+                // may have been consumed by the OS while the app was inactive
+                bool* bKeys = GetDXUTState().GetKeys();
+                bool* bLastKeys = GetDXUTState().GetLastKeys();
+                ZeroMemory( bKeys, sizeof(bool) * 256 );
+                ZeroMemory( bLastKeys, sizeof(bool) * 256 );
 
                 // Enable controller rumble & input when activating app
                 DXUTEnableXInput( true );
