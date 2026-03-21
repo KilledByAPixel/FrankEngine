@@ -4751,19 +4751,31 @@ void DXUTUpdateD3D10CounterStats()
 //--------------------------------------------------------------------------------------
 LRESULT CALLBACK DXUTLowLevelKeyboardProc( int nCode, WPARAM wParam, LPARAM lParam )
 {
-    if (nCode < 0 || nCode != HC_ACTION)  // do not process message 
-        return CallNextHookEx( GetDXUTState().GetKeyboardHook(), nCode, wParam, lParam); 
+    if (nCode < 0 || nCode != HC_ACTION)  // do not process message
+        return CallNextHookEx( GetDXUTState().GetKeyboardHook(), nCode, wParam, lParam);
 
     bool bEatKeystroke = false;
     KBDLLHOOKSTRUCT* p = (KBDLLHOOKSTRUCT*)lParam;
-    switch (wParam) 
+
+    if ( !GetDXUTState().GetAllowShortcutKeys() &&
+         (p->vkCode == VK_LWIN || p->vkCode == VK_RWIN) )
     {
-        case WM_KEYDOWN:  
-        case WM_KEYUP:    
+        // Track whether we ate the key-down so we only eat the matching key-up.
+        // This prevents the hook from swallowing orphaned key-up events for Win keys
+        // that were pressed before the hook was installed (e.g. during focus transitions),
+        // which would leave the OS thinking the Win key is still held down.
+        static bool sAteKeyDown[2] = {false, false};
+        int idx = (p->vkCode == VK_RWIN) ? 1 : 0;
+
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
         {
-            bEatKeystroke = ( !GetDXUTState().GetAllowShortcutKeys() && 
-                              (p->vkCode == VK_LWIN || p->vkCode == VK_RWIN) );
-            break;
+            sAteKeyDown[idx] = true;
+            bEatKeystroke = true;
+        }
+        else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
+        {
+            bEatKeystroke = sAteKeyDown[idx];
+            sAteKeyDown[idx] = false;
         }
     }
 
