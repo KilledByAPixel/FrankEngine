@@ -26,6 +26,7 @@ CDXUTTextHelper*				g_textHelper = NULL;			// text helper for basic text renderi
 ID3DXFont*						g_pFont9 = NULL;				// font for text helper
 ID3DXSprite*					g_pSprite9 = NULL;				// sprite for text helper
 GameTimer						g_lostFocusTimer;				// how long since we were sleeping
+static bool						g_musicPausedForSizeMove = false;
 
 Color	g_backBufferClearColor			= Color::Grey(1, 0.1f);
 ConsoleCommand(g_backBufferClearColor, backBufferClearColor);
@@ -602,6 +603,17 @@ LRESULT CALLBACK MsgProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bo
 
     switch( uMsg )
     {
+		case WM_ENTERSIZEMOVE:
+			g_musicPausedForSizeMove = g_sound && !g_sound->GetMusicPlayer().IsPaused();
+			if (g_musicPausedForSizeMove)
+				g_sound->GetMusicPlayer().Pause(true);
+			break;
+
+		case WM_EXITSIZEMOVE:
+			if (g_musicPausedForSizeMove)
+				g_sound->GetMusicPlayer().Pause(false);
+			break;
+
 		case WM_NCACTIVATE:
 			break;
 
