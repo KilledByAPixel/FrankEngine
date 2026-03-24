@@ -408,10 +408,16 @@ void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext 
 
 	{
 		// control hiding the mouse cursor
-		if (g_gameControlBase->ShouldHideMouseCursor() && (!DXUTIsWindowed() || g_cameraBase->CameraTest(g_gameControlBase->GetInputControl().GetMousePosWorldSpace())))
-			SetCursor(LoadCursor(NULL, NULL));
-		else
-			SetCursor(LoadCursor(NULL, IDC_ARROW));
+		// only override cursor when in client area to preserve window resize cursors
+		POINT cursorPos;
+		GetCursorPos(&cursorPos);
+		if (SendMessage(DXUTGetHWND(), WM_NCHITTEST, 0, MAKELPARAM(cursorPos.x, cursorPos.y)) == HTCLIENT)
+		{
+			if (g_gameControlBase->ShouldHideMouseCursor() && (!DXUTIsWindowed() || g_cameraBase->CameraTest(g_gameControlBase->GetInputControl().GetMousePosWorldSpace())))
+				SetCursor(LoadCursor(NULL, NULL));
+			else
+				SetCursor(LoadCursor(NULL, IDC_ARROW));
+		}
 	}
 
 	if (g_gameControlBase)
