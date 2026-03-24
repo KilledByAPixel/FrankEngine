@@ -116,6 +116,18 @@ void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBas
 	ASSERT(!g_input);
 	ASSERT(!g_physics);
 
+	// load saved fullscreen/windowed state
+	{
+		FILE* f = nullptr;
+		if (fopen_s(&f, "windowState.cfg", "r") == 0 && f)
+		{
+			int wasFullscreen = 0;
+			fscanf_s(f, "%d", &wasFullscreen);
+			startFullscreen = wasFullscreen != 0;
+			fclose(f);
+		}
+	}
+
 	// parse the autoexec debug commands
 	GetDebugConsole().ParseFile(L"autoexec.cfg", false);
 	GetDebugConsole().Init();
@@ -157,6 +169,16 @@ void FrankEngineLoop()
 
 void FrankEngineShutdown()
 {
+	// save fullscreen/windowed state for next launch
+	{
+		FILE* f = nullptr;
+		if (fopen_s(&f, "windowState.cfg", "w") == 0 && f)
+		{
+			fprintf(f, "%d", DXUTIsWindowed() ? 0 : 1);
+			fclose(f);
+		}
+	}
+
 	// remove files in temp folder
 	Editor::ClearTempFolder();
 
