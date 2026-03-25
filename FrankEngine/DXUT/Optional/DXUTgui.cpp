@@ -2821,10 +2821,10 @@ void CDXUTDialog::InitDefaultElements()
     SetRect( &rcTexture, 0, 0, 136, 54 );
     Element.SetTexture( 0, &rcTexture );
     Element.SetFont( 0 );
-    Element.TextureColor.States[ DXUT_STATE_NORMAL ] = D3DCOLOR_ARGB(255, 255, 255, 255);
-    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(200, 255, 255, 255);
-    Element.FontColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(255, 0, 0, 0);
-    Element.FontColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(255, 0, 0, 0);
+    Element.TextureColor.States[ DXUT_STATE_NORMAL ] = D3DCOLOR_ARGB(180, 100, 100, 100);      // background fill
+    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(200, 40, 40, 40); // background fill when pressed
+    Element.FontColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(255, 0, 0, 0);    // text color on hover
+    Element.FontColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(255, 0, 0, 0);         // text color when focused
     
     // Assign the Element
     SetDefaultElement( DXUT_CONTROL_BUTTON, 0, &Element );
@@ -2835,9 +2835,9 @@ void CDXUTDialog::InitDefaultElements()
     //-------------------------------------
     SetRect( &rcTexture, 136, 0, 252, 54 );
     Element.SetTexture( 0, &rcTexture, D3DCOLOR_ARGB(0, 255, 255, 255) );
-    Element.TextureColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(160, 255, 255, 255);
-    Element.TextureColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(160, 255, 255, 255);
-    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(60, 0, 0, 0);
+    Element.TextureColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(40, 255, 255, 255); // hover highlight overlay
+    Element.TextureColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(40, 255, 255, 255);    // focus highlight overlay
+    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(60, 0, 0, 0);        // pressed darken overlay
     
     
     // Assign the Element
@@ -3388,16 +3388,15 @@ bool CDXUTButton::HandleMouse( UINT uMsg, POINT pt, WPARAM wParam, LPARAM lParam
 //--------------------------------------------------------------------------------------
 void CDXUTButton::Render( float fElapsedTime )
 {
+    if( m_bVisible == false )
+        return;
+
     int nOffsetX = 0;
     int nOffsetY = 0;
 
     DXUT_CONTROL_STATE iState = DXUT_STATE_NORMAL;
 
-    if( m_bVisible == false )
-    {
-        iState = DXUT_STATE_HIDDEN;
-    }
-    else if( m_bEnabled == false )
+    if( m_bEnabled == false )
     {
         iState = DXUT_STATE_DISABLED;
     }
@@ -3423,18 +3422,23 @@ void CDXUTButton::Render( float fElapsedTime )
     // Background fill layer
     //TODO: remove magic numbers
     CDXUTElement* pElement = m_Elements.GetAt( 0 );
-    
+
     float fBlendRate = ( iState == DXUT_STATE_PRESSED ) ? 0.0f : 0.8f;
 
     RECT rcWindow = m_rcBoundingBox;
     OffsetRect( &rcWindow, nOffsetX, nOffsetY );
 
- 
+    // Outline
+    RECT rcOutline = rcWindow;
+    const int outlineSize = 2;
+    InflateRect( &rcOutline, outlineSize, outlineSize );
+    m_pDialog->DrawRect( &rcOutline, D3DCOLOR_ARGB(255, 0, 0, 0) ); // outline color
+
     // Blend current color
     pElement->TextureColor.Blend( iState, fElapsedTime, fBlendRate );
     pElement->FontColor.Blend( iState, fElapsedTime, fBlendRate );
 
-    m_pDialog->DrawSprite( pElement, &rcWindow, DXUT_FAR_BUTTON_DEPTH );
+    m_pDialog->DrawRect( &rcWindow, pElement->TextureColor.Current );
     m_pDialog->DrawText( m_strText, pElement, &rcWindow );
 
     // Main button
@@ -3444,7 +3448,7 @@ void CDXUTButton::Render( float fElapsedTime )
     pElement->TextureColor.Blend( iState, fElapsedTime, fBlendRate );
     pElement->FontColor.Blend( iState, fElapsedTime, fBlendRate );
 
-    m_pDialog->DrawSprite( pElement, &rcWindow, DXUT_NEAR_BUTTON_DEPTH );
+    m_pDialog->DrawRect( &rcWindow, pElement->TextureColor.Current );
     m_pDialog->DrawText( m_strText, pElement, &rcWindow );
 }
 
