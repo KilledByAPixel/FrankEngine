@@ -2821,10 +2821,10 @@ void CDXUTDialog::InitDefaultElements()
     SetRect( &rcTexture, 0, 0, 136, 54 );
     Element.SetTexture( 0, &rcTexture );
     Element.SetFont( 0 );
-    Element.TextureColor.States[ DXUT_STATE_NORMAL ] = D3DCOLOR_ARGB(180, 100, 100, 100);      // background fill
-    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(200, 40, 40, 40); // background fill when pressed
-    Element.FontColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(255, 0, 0, 0);    // text color on hover
-    Element.FontColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(255, 0, 0, 0);         // text color when focused
+    Element.TextureColor.States[ DXUT_STATE_NORMAL ] = D3DCOLOR_ARGB(128, 128, 128, 128); // background fill
+    Element.TextureColor.States[ DXUT_STATE_PRESSED ] = D3DCOLOR_ARGB(128, 40, 40, 40); // background fill when pressed
+    Element.FontColor.States[ DXUT_STATE_MOUSEOVER ] = D3DCOLOR_ARGB(255, 0, 0, 0); // text color on hover
+    Element.FontColor.States[ DXUT_STATE_FOCUS ] = D3DCOLOR_ARGB(255, 0, 0, 0); // text color when focused
     
     // Assign the Element
     SetDefaultElement( DXUT_CONTROL_BUTTON, 0, &Element );
@@ -3430,9 +3430,9 @@ void CDXUTButton::Render( float fElapsedTime )
 
     // Outline
     RECT rcOutline = rcWindow;
-    const int outlineSize = 2;
+    const int outlineSize = 3;
     InflateRect( &rcOutline, outlineSize, outlineSize );
-    m_pDialog->DrawRect( &rcOutline, D3DCOLOR_ARGB(255, 0, 0, 0) ); // outline color
+    m_pDialog->DrawRect( &rcOutline, D3DCOLOR_ARGB(200, 0, 0, 0) ); // outline color
 
     // Blend current color
     pElement->TextureColor.Blend( iState, fElapsedTime, fBlendRate );
