@@ -6,3 +6,4 @@ win32/
 .vs/
 obj/
 bin/
+.claude/
