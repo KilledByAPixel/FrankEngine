@@ -3392,8 +3392,8 @@ void CDXUTButton::Render( float fElapsedTime )
     if( m_bVisible == false )
         return;
 
-    // Cancel press if mouse moved off button
-    if( m_bPressed && !m_bMouseOver )
+    // Cancel press if mouse moved off button (only for mouse-initiated presses)
+    if( m_bPressed && !m_bMouseOver && GetCapture() == DXUTGetHWND() )
     {
         m_bPressed = false;
         ReleaseCapture();
