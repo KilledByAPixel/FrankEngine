@@ -3141,10 +3141,11 @@ void CDXUTControl::SetTextColor( D3DCOLOR Color )
 
 void CDXUTControl::SetFont( UINT iFont )
 {
+    // Only change the font index, not the colors
     for( int i=0; i < m_Elements.GetSize(); i++ )
     {
         CDXUTElement* pElement = m_Elements.GetAt( i );
-        pElement->SetFont(iFont);
+        pElement->iFont = iFont;
     }
 }
 
