@@ -3412,15 +3412,15 @@ void CDXUTButton::Render( float fElapsedTime )
     {
         iState = DXUT_STATE_PRESSED;
 
-        nOffsetX = 1;
-        nOffsetY = 2;
+        //nOffsetX = 1;
+        //nOffsetY = 2;
     }
     else if( m_bMouseOver )
     {
         iState = DXUT_STATE_MOUSEOVER;
 
-        nOffsetX = -1;
-        nOffsetY = -2;
+        //nOffsetX = -1;
+        //nOffsetY = -2;
     }
     else if( m_bHasFocus )
     {
