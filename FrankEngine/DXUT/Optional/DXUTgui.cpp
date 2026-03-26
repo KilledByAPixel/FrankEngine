@@ -3391,6 +3391,13 @@ void CDXUTButton::Render( float fElapsedTime )
     if( m_bVisible == false )
         return;
 
+    // Cancel press if mouse moved off button
+    if( m_bPressed && !m_bMouseOver )
+    {
+        m_bPressed = false;
+        ReleaseCapture();
+    }
+
     int nOffsetX = 0;
     int nOffsetY = 0;
 
