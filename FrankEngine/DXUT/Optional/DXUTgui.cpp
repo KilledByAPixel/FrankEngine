@@ -2595,8 +2595,8 @@ HRESULT CDXUTDialogResourceManager::CreateFont9( UINT iFont )
 
     SAFE_RELEASE( pFontNode->pFont9 );
 
-    V_RETURN( D3DXCreateFont( m_pd3d9Device, pFontNode->nHeight, 0, pFontNode->nWeight, 1, FALSE, DEFAULT_CHARSET, 
-                              OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, 
+    V_RETURN( D3DXCreateFont( m_pd3d9Device, pFontNode->nHeight, 0, pFontNode->nWeight, 1, FALSE, DEFAULT_CHARSET,
+                              OUT_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
                               pFontNode->strFace, &pFontNode->pFont9 ) );
 
     return S_OK;
@@ -2612,8 +2612,8 @@ HRESULT CDXUTDialogResourceManager::CreateFont10( UINT iFont )
 
     SAFE_RELEASE( pFontNode->pFont10 );
 
-    V_RETURN( D3DX10CreateFont( m_pd3d10Device, pFontNode->nHeight, 0, pFontNode->nWeight, 1, FALSE, DEFAULT_CHARSET, 
-                                OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, 
+    V_RETURN( D3DX10CreateFont( m_pd3d10Device, pFontNode->nHeight, 0, pFontNode->nWeight, 1, FALSE, DEFAULT_CHARSET,
+                                OUT_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
                                 pFontNode->strFace, &pFontNode->pFont10 ) );
 
     return S_OK;
