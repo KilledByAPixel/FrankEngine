@@ -485,7 +485,7 @@ void GameControlBase::UpdateFrameInternal(float delta)
 		}
 	}
 
-	if (g_input->WasJustPushed(GB_RefreshResources))
+	if (devMode && g_input->WasJustPushed(GB_RefreshResources))
 	{
 		g_render->ReloadModifiedTextures();
 		DestroyDeviceObjects();
@@ -493,7 +493,7 @@ void GameControlBase::UpdateFrameInternal(float delta)
 		g_debugMessageSystem.AddFormatted(L"Resources refreshed");
 	}
 
-	if (g_input->WasJustPushed(GB_Screenshot))
+	if (devMode && g_input->WasJustPushed(GB_Screenshot))
 		g_cameraBase->SaveScreenshot();
 
 	{
