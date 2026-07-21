@@ -235,7 +235,12 @@ SoundObjectSmartPointer SoundControl::PlayInternal(SoundID si, const Vector2& po
 {
 	if (!soundEnable || !soundManager)
 		return NULL;
-	
+
+	// the sound id can come from a stub attribute, so it may be anything
+	// LoadSound asserts this range but playing did not check it
+	if ((int)si < 0 || (int)si >= maxSoundAssets)
+		return NULL;
+
 	SoundAsset& soundAsset = soundAssets[si];
 	CSound* sound = soundAsset.sound;
 	if (!sound)

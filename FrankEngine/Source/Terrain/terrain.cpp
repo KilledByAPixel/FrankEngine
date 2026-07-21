@@ -511,7 +511,16 @@ bool Terrain::Load(const WCHAR* filename)
 
 			int attributesLength = 0;
 			inTerrainFile.read((char *)&attributesLength, sizeof(attributesLength));
+
+			// clamp the length, it comes straight out of the file
+			// a truncated or corrupt file would otherwise smash the stack here
+			if (attributesLength < 0)
+				attributesLength = 0;
+			if (attributesLength > GameObjectStub::attributesLength)
+				attributesLength = GameObjectStub::attributesLength;
+
 			inTerrainFile.read((char *)&stub.attributes, attributesLength);
+			stub.attributes[GameObjectStub::attributesLength - 1] = 0;
 			
 			patch.AddStub(stub);
 			if (inTerrainFile.eof())
@@ -614,8 +623,16 @@ bool Terrain::LoadFromResource(const WCHAR* filename)
 			char* attributes = NULL;
 			int attributesLength = 0;
 			attributesLength = *(int*)(dataPointer); dataPointer += sizeof(int);
+
+			// clamp before walking the resource pointer by this amount
+			if (attributesLength < 0)
+				attributesLength = 0;
+
 			attributes = (char*)(dataPointer); dataPointer += attributesLength;
-			strncpy_s(stub.attributes, attributes, sizeof(stub.attributes));
+
+			// _TRUNCATE, the source may not be null terminated inside its length
+			// without it strncpy_s aborts the process instead of truncating
+			strncpy_s(stub.attributes, sizeof(stub.attributes), attributes, _TRUNCATE);
 			
 			patch.AddStub(stub);
 		}

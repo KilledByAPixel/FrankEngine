@@ -60,7 +60,14 @@ void Weapon::Update()
 	fireTimer = Min(fireTimer, GAME_TIME_STEP);
 
 	if (triggerIsDown)
-		while (Fire());
+	{
+		// a fireRate of 0 never advances fireTimer, so CanFire() would stay true
+		// and this loop would spin forever allocating projectiles
+		if (weaponDef.fireRate > 0)
+			while (Fire());
+		else
+			Fire();
+	}
 
 	if (triggerWasDown && !triggerIsDown)
 		TriggerReleased();
