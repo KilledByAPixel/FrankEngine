@@ -176,6 +176,14 @@ void FrankEngineShutdown()
 		if (GameControlBase::autoSaveTerrain && !g_gameControlBase->IsGameplayMode() && g_terrain)
 			g_terrain->Save(Terrain::terrainFilename);
 		g_gameControlBase->DestroyDeviceObjects();
+
+		// assets have to be released here, not left to OnD3D9DestroyDevice.
+		// dxut destroys the device from its static state destructor, which runs
+		// after wWinMain returns, by which point g_gameControlBase is gone and
+		// the callback would skip the release. that leaves textures holding
+		// references and directx reports a non-zero device reference count.
+		g_gameControlBase->ReleaseAssets();
+
 		delete g_gameControlBase;
 		g_gameControlBase = NULL;
 	}
@@ -317,8 +325,8 @@ HRESULT CALLBACK OnD3D9ResetDevice( IDirect3DDevice9* pd3dDevice,
 		g_gameControlBase->GetInputControl().Clear();
 
 		// reset the gui
-		g_guiBase->OnResetDevice(); 
-		g_editorGui.OnResetDevice(); 
+		g_guiBase->OnResetDevice();
+		g_editorGui.OnResetDevice();
 	}
 
     return S_OK;
@@ -349,7 +357,15 @@ void CALLBACK OnD3D9LostDevice( void* pUserContext )
 void CALLBACK OnD3D9DestroyDevice( void* pUserContext )
 {
 	if (g_gameControlBase)
+	{
 		g_gameControlBase->DestroyDeviceObjects();
+
+		// the device is going away for real here, not just being reset, so the
+		// textures and sounds we normally hold onto have to be unloaded too
+		// this also covers dxut recreating the device when the window moves to
+		// a different adapter, the next InitDeviceObjects() reloads everything
+		g_gameControlBase->ReleaseAssets();
+	}
 
 	ASSERT(g_render);
 	SAFE_DELETE(g_render);

@@ -19,6 +19,9 @@ Terrain*			g_terrain	= NULL;
 bool GameControlBase::showDebugInfo = false;
 ConsoleCommand(GameControlBase::showDebugInfo, debugInfoEnable);
 
+// textures and sounds are loaded once rather than per device reset
+static bool assetsLoaded = false;
+
 bool GameControlBase::autoSaveTerrain = true;
 ConsoleCommand(GameControlBase::autoSaveTerrain, autoSaveTerrain);
 
@@ -496,6 +499,7 @@ void GameControlBase::UpdateFrameInternal(float delta)
 	{
 		g_render->ReloadModifiedTextures();
 		DestroyDeviceObjects();
+		ReleaseAssets();
 		InitDeviceObjects();
 		g_debugMessageSystem.AddFormatted(L"Resources refreshed");
 	}
@@ -749,9 +753,15 @@ void GameControlBase::InitDeviceObjects()
 	DeferredRender::InitDeviceObjects();
 	FrankFont::InitDeviceObjects();
 
-	// load assets
-	LoadSounds();
-	LoadTextures();
+	// load assets once, not on every device reset
+	// sounds are directsound buffers and are not affected by a d3d reset at all,
+	// and textures are managed pool so directx restores them by itself
+	if (!assetsLoaded)
+	{
+		assetsLoaded = true;
+		LoadSounds();
+		LoadTextures();
+	}
 
 	// setup input
 	static bool inputWasSetup = false;
@@ -765,12 +775,23 @@ void GameControlBase::InitDeviceObjects()
 		GetMiniMap()->InitDeviceObjects();
 }
 
+// unloads textures and sounds so the next InitDeviceObjects() reloads them
+void GameControlBase::ReleaseAssets()
+{
+	if (g_render)
+		g_render->ReleaseTextures();
+	if (g_sound)
+		g_sound->ReleaseSounds();
+	assetsLoaded = false;
+}
+
 void GameControlBase::DestroyDeviceObjects()
 {
 	if (g_render)
 		g_render->DestroyDeviceObjects();
-	if (g_sound)
-		g_sound->ReleaseSounds();
+	
+	// note: sounds and textures are deliberately not released here,
+	// this runs on every device reset. see ReleaseAssets().
 	g_debugRender.DestroyDeviceObjects();
 	g_terrainRender.DestroyDeviceObjects();
 	DeferredRender::DestroyDeviceObjects();

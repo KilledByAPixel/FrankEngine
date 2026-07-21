@@ -28,9 +28,16 @@ public:
 	FrankRender();
 
 	void InitDeviceObjects();
+
+	// releases only what a device reset invalidates, textures are kept
 	void DestroyDeviceObjects();
 
 	bool LoadTexture(const WCHAR* textureName, TextureID ti);
+
+	// unloads every texture. do NOT call this for a device reset, textures are
+	// D3DPOOL_MANAGED so directx restores them itself, and reloading them from
+	// disk was the main cost of switching window modes. shutdown or explicit
+	// asset reload only, see GameControlBase::ReleaseAssets().
 	void ReleaseTextures();
 	void ReloadModifiedTextures();
 	

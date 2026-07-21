@@ -46,6 +46,10 @@ public:
 	virtual void DestroyDeviceObjects();
 	virtual void Shutdown() {}
 
+	// textures and sounds are loaded once, not per device reset
+	// call this to unload them, for shutdown or to force a reload from disk
+	void ReleaseAssets();
+
 	InputControl& GetInputControl() { return *g_input; }
 
 	UINT GetRenderFrameCount() const { return renderFrameCount; }
