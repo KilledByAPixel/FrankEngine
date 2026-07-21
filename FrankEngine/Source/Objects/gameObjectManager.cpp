@@ -114,12 +114,26 @@ void GameObjectManager::Remove(const GameObject& obj)
 
 void GameObjectManager::Update()
 {
+	// take a snapshot of the object pointers before updating anything
+	// objects routinely spawn other objects from their Update(), and adding to
+	// the hash table can rehash it, which invalidates any iterator we are holding
+	// objects cannot be deleted here (lockDeleteObjects is on), so the pointers
+	// stay valid for the whole pass, they just may get flagged destroyed
+	// kept static so it holds its capacity and does not reallocate every frame
+	static vector<GameObject*> updateList;
+	updateList.clear();
+	updateList.reserve(objects.size());
 	for (const GameObjectHashPair& hashPair : objects)
+		updateList.push_back(hashPair.second);
+
+	for (GameObject* objectPointer : updateList)
 	{
-		GameObject& obj = *hashPair.second;
+		GameObject& obj = *objectPointer;
+
+		// recheck destroyed, an earlier object may have killed this one
 		if (obj.IsDestroyed() || obj.WasJustAdded())
 			continue;
-		
+
 		obj.Update();
 	}
 }
