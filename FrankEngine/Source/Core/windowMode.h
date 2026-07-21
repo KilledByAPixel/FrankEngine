@@ -14,6 +14,13 @@
 	the device windowed as far as directx is concerned, so switching is just a window
 	resize and the display mode is never touched.
 
+	To the player this is a two state toggle, Window and Full Screen. Which one
+	"Full Screen" means is decided at launch: normally it is Borderless, but passing
+	-exclusivefullscreen (or -exclusive) on the command line makes it the old
+	exclusive mode instead, for anyone who needs it for capture or latency reasons.
+	Do not use dxut's own -fullscreen or -windowed flags, they override the device
+	underneath this class and leave the mode here stale.
+
 	IMPORTANT: do not use DXUTIsWindowed() to test for fullscreen anymore. In borderless
 	mode the device really is windowed, so that check returns true even though the window
 	is covering the whole screen. Use IsCoveringScreen() instead.
@@ -39,8 +46,14 @@ public:
 	// change the window mode, does nothing if already in that mode
 	static void SetMode(WindowDisplayMode newMode);
 
-	// windowed -> borderless -> fullscreen -> windowed
+	// toggles between windowed and whatever fullscreen means this run
 	static void CycleMode();
+
+	// go windowed or fullscreen without caring which fullscreen mode is active
+	static void SetFullscreen(bool fullscreen);
+
+	// true if launched with -exclusivefullscreen
+	static bool IsExclusiveFullscreenAllowed() { return allowExclusiveFullscreen; }
 
 	// display name for a mode, for gui buttons
 	static const WCHAR* GetModeName() { return GetModeName(mode); }
@@ -66,7 +79,11 @@ private:
 	static void ApplyBorderless();
 	static void RestoreWindowed();
 
+	// which mode the "Full Screen" option maps to this run
+	static WindowDisplayMode GetFullscreenMode();
+
 	static WindowDisplayMode mode;
+	static bool allowExclusiveFullscreen;
 
 	// window placement to restore when leaving borderless
 	static RECT windowedRect;
