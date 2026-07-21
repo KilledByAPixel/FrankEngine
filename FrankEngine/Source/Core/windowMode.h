@@ -49,6 +49,11 @@ public:
 	// true when the window covers the whole screen, borderless or exclusive
 	static bool IsCoveringScreen() { return mode != WindowDisplayMode::Windowed; }
 
+	// refresh rate of the monitor the window is actually on
+	// prefer this over DXUTGetRefreshRate(), which reports the adapter's desktop
+	// mode and so returns the wrong monitor on a mixed refresh rate setup
+	static int GetRefreshRate();
+
 	// load and save the mode to windowState.cfg
 	static void Load();
 	static void Save();

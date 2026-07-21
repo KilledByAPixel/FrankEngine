@@ -98,6 +98,32 @@ void WindowControl::SetMode(WindowDisplayMode newMode)
 	}
 }
 
+int WindowControl::GetRefreshRate()
+{
+	HWND hWnd = DXUTGetHWND();
+	if (hWnd)
+	{
+		MONITORINFOEX monitorInfo;
+		ZeroMemory(&monitorInfo, sizeof(monitorInfo));
+		monitorInfo.cbSize = sizeof(monitorInfo);
+
+		if (GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), &monitorInfo))
+		{
+			DEVMODE devMode;
+			ZeroMemory(&devMode, sizeof(devMode));
+			devMode.dmSize = sizeof(devMode);
+
+			// 0 and 1 both mean "hardware default" rather than a real rate
+			if (EnumDisplaySettings(monitorInfo.szDevice, ENUM_CURRENT_SETTINGS, &devMode)
+				&& devMode.dmDisplayFrequency > 1)
+				return int(devMode.dmDisplayFrequency);
+		}
+	}
+
+	// fall back to whatever dxut thinks
+	return int(DXUTGetRefreshRate());
+}
+
 void WindowControl::ApplyStartupMode()
 {
 	// exclusive fullscreen is handled when the device is created, nothing to do here

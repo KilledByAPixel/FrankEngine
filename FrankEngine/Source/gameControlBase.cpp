@@ -180,7 +180,7 @@ void GameControlBase::Update(float delta)
 	if (wasteCycles > 0)
 	{ for(int i = 0; i < 400000*wasteCycles; ++i) { wasteCycleTestValue += sqrt((float)i); } }
 
-	if (DXUTIsVsyncEnabled() && DXUTGetRefreshRate() > 0)
+	if (DXUTIsVsyncEnabled() && WindowControl::GetRefreshRate() > 0)
 	{
 		if (useFrameDeltaSmoothing)
 		{
@@ -199,7 +199,7 @@ void GameControlBase::Update(float delta)
 			const float oldDelta = delta;
 
 			// use refresh rate as delta
-			const int refreshRate = DXUTGetRefreshRate();
+			const int refreshRate = WindowControl::GetRefreshRate();
 			delta = 1.0f / refreshRate;
 
 			// update delta buffer so we keep the same time
@@ -207,29 +207,36 @@ void GameControlBase::Update(float delta)
 			float frames = deltaBuffer / delta;
 			frames = floor(frames);
 			
-			// clamp buffer if it gets too big
+			// clamp the buffer so it can never run away in either direction
 			int maxFrames = 3;
 			if (frames > maxFrames)
 			{
+				// running behind, deliver extra time to catch up
 				frames = frames - maxFrames;
 				deltaBuffer -= frames * delta;
 				delta += frames * delta;
 				droppedFrameTimer.Set();
 			}
-
-			if (deltaBuffer < -1)
+			else
 			{
-				g_debugMessageSystem.AddError(L"Fast Vsync Detected!\nDelta Smoothing Disabled.");
-				useFrameDeltaSmoothing = false;
-				deltaBuffer = 0;
-				delta = 0;
+				// running ahead, deliver less time so the game cannot speed up
+				// this happens when the reported refresh rate is lower than the real one,
+				// from rounding (59 vs 60), variable refresh, or a driver vsync override
+				const float minDeltaBuffer = -maxFrames * delta;
+				if (deltaBuffer < minDeltaBuffer)
+				{
+					// never deliver negative time, just shorten the frame
+					const float giveBack = Min(minDeltaBuffer - deltaBuffer, delta);
+					delta -= giveBack;
+					deltaBuffer += giveBack;
+				}
 			}
 		}
 
 		if (useRefreshRateAsFrameDelta)
 		{
 			// the easy way works if we know we can render at the refersh rate
-			const int fps = DXUTGetRefreshRate();
+			const int fps = WindowControl::GetRefreshRate();
 			delta = 1 / (float)fps;
 		}
 	}
