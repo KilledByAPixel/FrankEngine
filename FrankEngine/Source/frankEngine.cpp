@@ -27,6 +27,7 @@ ID3DXFont*						g_pFont9 = NULL;				// font for text helper
 ID3DXSprite*					g_pSprite9 = NULL;				// sprite for text helper
 GameTimer						g_lostFocusTimer;				// how long since we were sleeping
 static bool						g_musicPausedForSizeMove = false;
+static bool						g_musicPausedForDeviceReset = false;
 
 Color	g_backBufferClearColor			= Color::Grey(1, 0.1f);
 ConsoleCommand(g_backBufferClearColor, backBufferClearColor);
@@ -329,6 +330,14 @@ HRESULT CALLBACK OnD3D9ResetDevice( IDirect3DDevice9* pd3dDevice,
 		g_editorGui.OnResetDevice();
 	}
 
+	// resume music now that everything has been rebuilt
+	if (g_musicPausedForDeviceReset)
+	{
+		g_musicPausedForDeviceReset = false;
+		if (g_sound)
+			g_sound->GetMusicPlayer().Pause(false);
+	}
+
     return S_OK;
 }
 
@@ -338,6 +347,13 @@ HRESULT CALLBACK OnD3D9ResetDevice( IDirect3DDevice9* pd3dDevice,
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D9LostDevice( void* pUserContext )
 {
+	// pause music across the reset. the stream keeps looping over its buffer
+	// while everything is being torn down and rebuilt, which sounds terrible.
+	// checking IsPaused() first means this composes with the size move pause.
+	g_musicPausedForDeviceReset = g_sound && !g_sound->GetMusicPlayer().IsPaused();
+	if (g_musicPausedForDeviceReset)
+		g_sound->GetMusicPlayer().Pause(true);
+
     g_dialogResourceManager.OnD3D9LostDevice();
     if( g_pFont9 ) g_pFont9->OnLostDevice();
     SAFE_RELEASE( g_pSprite9 );
