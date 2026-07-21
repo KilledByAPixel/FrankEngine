@@ -161,6 +161,9 @@
     <ClCompile Include="Source\Core\pathFindingBase.cpp">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Core\windowMode.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Rendering\frankDebugRender.cpp">
       <Filter>Debug</Filter>
     </ClCompile>
@@ -295,6 +298,9 @@
       <Filter>Objects</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\pathFindingBase.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\windowMode.h">
       <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="Source\Rendering\frankDebugRender.h">

@@ -235,6 +235,7 @@
     <ClCompile Include="Source\Core\frankUtil.cpp" />
     <ClCompile Include="Source\Core\inputControl.cpp" />
     <ClCompile Include="Source\Core\pathFindingBase.cpp" />
+    <ClCompile Include="Source\Core\windowMode.cpp" />
     <ClCompile Include="Source\Core\perlinNoise.cpp" />
     <ClCompile Include="Source\Editor\editor.cpp" />
     <ClCompile Include="Source\Editor\objectEditor.cpp" />
@@ -308,6 +309,7 @@
     <ClInclude Include="Source\Core\frankUtil.h" />
     <ClInclude Include="Source\Core\inputControl.h" />
     <ClInclude Include="Source\Core\pathFindingBase.h" />
+    <ClInclude Include="Source\Core\windowMode.h" />
     <ClInclude Include="Source\Core\perlinNoise.h" />
     <ClInclude Include="Source\Editor\editor.h" />
     <ClInclude Include="Source\Editor\objectEditor.h" />

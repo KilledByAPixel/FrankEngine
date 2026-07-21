@@ -123,7 +123,7 @@ void GameGui::OnResetDevice()
 	}
 	{
 		// button bar
-		mainDialog.GetButton( ControlId_button_fullscreen )->SetText(DXUTIsWindowed()? L"Full" : L"Window");
+		mainDialog.GetButton( ControlId_button_fullscreen )->SetText(WindowControl::GetModeName());
 
 		Vector2 buttonSize( g_backBufferWidth * 1.0f / 5.2f, 46 );
 		buttonSize.x = Min(buttonSize.x, 240.0f);
@@ -226,7 +226,7 @@ static void CALLBACK OnGUIEvent( UINT nEvent, int nControlID, CDXUTControl* pCon
 		}
 		case ControlId_button_fullscreen:
 		{	
-			DXUTToggleFullScreen();
+			WindowControl::CycleMode();
 			break;
 		}
 		case ControlId_button_quit:

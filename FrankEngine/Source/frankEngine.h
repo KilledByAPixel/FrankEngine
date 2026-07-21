@@ -91,6 +91,7 @@ const GameDamageType GameDamageType_Default = GameDamageType(0);
 #include "core/perlinNoise.h"
 #include "core/debugConsole.h"
 #include "core/pathFindingBase.h"
+#include "core/windowMode.h"
 #include "objects/gameObject.h"
 #include "objects/camera.h"
 #include "gameControlBase.h"

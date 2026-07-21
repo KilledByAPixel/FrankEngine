@@ -34,12 +34,8 @@ Color	g_editorBackBufferClearColor	= Color::Grey(1, 0.2f);
 ConsoleCommand(g_editorBackBufferClearColor, editorBackBufferClearColor);
 
 //--------------------------------------------------------------------------------------
-// debug builds always start in window mode, release builds start full screen
-#if defined(DEBUG) | defined(_DEBUG) | defined(PROFILE)
-ConsoleCommandSimple(bool, startFullscreen, false);
-#else
-ConsoleCommandSimple(bool, startFullscreen, true);
-#endif
+// window mode is owned by WindowControl, see core/windowMode.h
+// debug builds start windowed, release builds start borderless
 
 bool enableVsync = true;
 static void ConsoleCommandCallback_enableVsync(const wstring& text)
@@ -96,7 +92,8 @@ void FrankEngineStartup(const WCHAR* title, int maxObjectCount, size_t maxObject
 	DXUTSetCallbackD3D9FrameRender( OnD3D9FrameRender );
 	DXUTInit( true, true, NULL ); // Parse the command line, show msgboxes on error, no extra command line params
 	DXUTSetCursorSettings( true, true );
-	DXUTSetHotkeyHandling(true, true, false);	// hotkeys: fullscreen, escape, pause
+	// alt enter is handled in OnKeyboard, dxut would jump straight to exclusive fullscreen
+	DXUTSetHotkeyHandling(false, true, false);	// hotkeys: fullscreen, escape, pause
 	DXUTCreateWindow( title );
 
 	// set random seeds
@@ -117,17 +114,8 @@ void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBas
 	ASSERT(!g_input);
 	ASSERT(!g_physics);
 
-	// load saved fullscreen/windowed state
-	{
-		FILE* f = nullptr;
-		if (fopen_s(&f, "windowState.cfg", "r") == 0 && f)
-		{
-			int wasFullscreen = 0;
-			fscanf_s(f, "%d", &wasFullscreen);
-			startFullscreen = wasFullscreen != 0;
-			fclose(f);
-		}
-	}
+	// load saved window mode, autoexec below can still override it
+	WindowControl::Load();
 
 	// parse the autoexec debug commands
 	GetDebugConsole().ParseFile(L"autoexec.cfg", false);
@@ -150,14 +138,18 @@ void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBas
 	g_backBufferWidth = width;
 	g_backBufferHeight = height;
 	g_gameControlBase->PreInit();
-	if (startFullscreen)
+	if (WindowControl::GetMode() == WindowDisplayMode::Fullscreen)
 	{
-		// start in full screen mode
+		// start in legacy exclusive full screen mode
 		DXUTCreateDevice( false, 0, 0 );
 		DXUTSetWindowBackBufferSizeAtModeChange( width, height );
 	}
 	else
+	{
+		// borderless is still a windowed device, it just covers the monitor
 		DXUTCreateDevice( true, g_backBufferWidth, g_backBufferHeight );
+		WindowControl::ApplyStartupMode();
+	}
 
 	// init the game control before gameplay starts
 	g_gameControlBase->Init();
@@ -170,15 +162,8 @@ void FrankEngineLoop()
 
 void FrankEngineShutdown()
 {
-	// save fullscreen/windowed state for next launch
-	{
-		FILE* f = nullptr;
-		if (fopen_s(&f, "windowState.cfg", "w") == 0 && f)
-		{
-			fprintf(f, "%d", DXUTIsWindowed() ? 0 : 1);
-			fclose(f);
-		}
-	}
+	// save window mode for next launch
+	WindowControl::Save();
 
 	// remove files in temp folder
 	Editor::ClearTempFolder();
@@ -436,7 +421,8 @@ void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext 
 		GetCursorPos(&cursorPos);
 		if (SendMessage(DXUTGetHWND(), WM_NCHITTEST, 0, MAKELPARAM(cursorPos.x, cursorPos.y)) == HTCLIENT)
 		{
-			if (g_gameControlBase->ShouldHideMouseCursor() && (!DXUTIsWindowed() || g_cameraBase->CameraTest(g_gameControlBase->GetInputControl().GetMousePosWorldSpace())))
+			// note: use IsCoveringScreen() not DXUTIsWindowed(), borderless is still a windowed device
+			if (g_gameControlBase->ShouldHideMouseCursor() && (WindowControl::IsCoveringScreen() || g_cameraBase->CameraTest(g_gameControlBase->GetInputControl().GetMousePosWorldSpace())))
 				SetCursor(LoadCursor(NULL, NULL));
 			else
 				SetCursor(LoadCursor(NULL, IDC_ARROW));
@@ -662,5 +648,12 @@ LRESULT CALLBACK MsgProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bo
 //--------------------------------------------------------------------------------------
 void CALLBACK OnKeyboard( UINT nChar, bool bKeyDown, bool bAltDown, void* pUserContext )
 {
+	// handle alt enter ourselves, dxut would jump straight to exclusive fullscreen
+	if (bKeyDown && bAltDown && nChar == VK_RETURN)
+	{
+		WindowControl::CycleMode();
+		return;
+	}
+
 	g_gameControlBase->GetInputControl().OnKeyboard( nChar, bKeyDown, bAltDown, pUserContext );
 }

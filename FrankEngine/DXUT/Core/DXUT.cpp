@@ -2479,8 +2479,15 @@ HRESULT DXUTChangeDevice( DXUTDeviceSettings* pNewDeviceSettings,
         }
     }
 
-    // Only resize window if needed 
-    if( bNeedToResize ) 
+    // FRANK ENGINE: a borderless fullscreen window is sized by WindowControl to cover the
+    // entire monitor, including the area behind the taskbar. The resize code below clamps
+    // and re-centers the window into miAdapter.rcWork, which excludes the taskbar, so it
+    // would drag the window back out of fullscreen. Leave borderless windows alone.
+    if( GetWindowLong( DXUTGetHWNDDeviceWindowed(), GWL_STYLE ) & WS_POPUP )
+        bNeedToResize = false;
+
+    // Only resize window if needed
+    if( bNeedToResize )
     {
         // Need to resize, so if window is maximized or minimized then restore the window
         if( IsIconic(DXUTGetHWNDDeviceWindowed()) ) 

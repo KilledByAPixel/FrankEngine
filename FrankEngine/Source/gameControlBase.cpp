@@ -149,7 +149,7 @@ void GameControlBase::Reset()
 
 	{
 		// tell directx what hot keys to handle
-		const bool altEnterToToggleFullscreen = true;
+		const bool altEnterToToggleFullscreen = false;	// handled in OnKeyboard so it can cycle window modes
 		const bool escapeToQuit = IsEditMode();
 		const bool pauseToToggleTimePause = false;
 		DXUTSetHotkeyHandling(altEnterToToggleFullscreen, escapeToQuit, pauseToToggleTimePause);

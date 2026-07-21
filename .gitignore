@@ -1,5 +1,6 @@
 # ignore files
 *.user
+windowState.cfg
 
 # ignore folders
 win32/
