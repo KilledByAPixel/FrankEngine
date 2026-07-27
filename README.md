@@ -2,11 +2,15 @@
 
 Frank Engine is a game development framework with a built in editor written in C++. The goal is to be a fast way to create large open world 2D games with high quality graphics. Everything necessary to create a fully featured game is included: physics (Box2D), rendering (DirectX), level editor, dynamic lighting, particle system, sound, music (Ogg Vorbis), gamepad input, GUI, and debug console. The code is fairly well documented and includes simple starter projects build on.
 
+## [Play the demo in your browser](https://killedbyapixel.github.io/FrankEngine/)
+
+Frank Engine compiles to WebAssembly, so games built with it run in a browser with no plugins or installs. That link is the included TestGame sample, built straight from this repo. See [Web Builds](#web-builds) below.
+
 ## Features
 - Large streamable worlds with small memory footprint
 - Integrated level editor, instantly switch from editing to playing!
 - Integrated Box2d Physics
-- Deferred rendering with diffuse, normal and emissive maps
+- Deferred rendering with diffuse, normal, specular and emissive maps
 - Supports a ton of dynamic shadow casters and shadow casting lights
 - 2D sprite, terrain, and particle system
 - Stereo sound effects with Direct Sound
@@ -16,6 +20,7 @@ Frank Engine is a game development framework with a built in editor written in C
 - Keyboard, mouse, and joystick input binding system
 - In game debug console
 - User friendly editor features: cut, copy, paste, undo, and redo
+- Also compiles to WebAssembly to run in a browser, rendering through WebGL 2
 
 
 ## Videos
@@ -29,6 +34,18 @@ Frank Engine is a game development framework with a built in editor written in C
 ![Screenshot 2](/screenshots/2.jpg)
 ![Screenshot 3](/screenshots/3.jpg)
 ![Screenshot 4](/screenshots/1.jpg)
+
+## Web Builds
+
+The same source builds for the web with [Emscripten](https://emscripten.org/), targeting WebAssembly and WebGL 2. Windows remains the primary target and is unaffected: the platform layer lives in `FrankEngine/Source/Web` and is selected with `FRANK_PLATFORM_WEB`, so the gameplay, physics and rendering code is shared.
+
+To build the TestGame sample, install Emscripten and run:
+
+    web/engineBuild/build.ps1
+
+Then serve the `web` folder over HTTP and open `engineBuild/` (the .wasm and preloaded data will not load from a `file://` URL).
+
+The deferred renderer runs in full on the web, including dynamic shadow casting lights, normal and specular mapping, terrain streaming, sound, music and gamepad input. The level editor is Windows only.
 
 ## Basic Engine Commands
 
