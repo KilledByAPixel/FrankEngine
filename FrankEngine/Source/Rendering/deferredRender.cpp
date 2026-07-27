@@ -2139,7 +2139,13 @@ void DeferredRender::RenderDirectionalPass()
 					0,			0,			0,		1
 				);
 
-				shadowLightConstantTable->SetMatrix(pd3dDevice, "normalMatrix", &matrix);
+				// this is the DIRECTIONAL light's matrix, so it belongs on the directional
+				// light's table - every other constant in this block already uses it, and
+				// directionalLightShader is what gets drawn with. d3d9 hid the mistake
+				// because SetMatrix writes the device's global pixel shader constant
+				// registers, so it landed in the right register by luck; a backend with
+				// per-program uniforms never sees the value at all.
+				directionalLightConstantTable->SetMatrix(pd3dDevice, "normalMatrix", &matrix);
 			}
 
 			pd3dDevice->SetTexture(0, textureNormalMap);
