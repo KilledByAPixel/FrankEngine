@@ -1,0 +1,13 @@
+spike/build/
+mathTest/build/
+lightSpike/build/
+engineBuild/build/
+
+diag_*
+*.log
+build/
+buildAsan/
+buildRelease/
+release/build/
+pirootWebDemo.zip
+*.png

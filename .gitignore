@@ -8,3 +8,16 @@ win32/
 obj/
 bin/
 .claude/
+local/
+# GL command-stream captures - hundreds of MB, regenerate with ?gltrace
+*.gltrace.json
+
+# private games - build configs live here but the games are not public
+web/pirootBuild/
+web/barfcadeBuild/
+
+# runtime console state and debug buffer dumps
+consoleMemory.txt
+consolePinned.txt
+normalMapBuffer.jpg
+specularMapBuffer.jpg
