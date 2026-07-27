@@ -1,0 +1,378 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL2 dropped-draw repro (self-contained)</title>
+<style>
+	body { background:#111; color:#9c9; font:13px monospace; margin:0; padding:10px;
+	       display:flex; flex-direction:column; align-items:center; }
+	canvas { width:min(900px,88vw); background:#000; display:block; }
+	#hud { margin:8px 0; } #hud.bad { color:#f66; font-weight:bold; }
+	#cfg { color:#999; margin-bottom:6px; text-align:center; max-width:900px; }
+</style>
+</head>
+<body>
+<div id="cfg"></div>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="hud">starting…</div>
+<script>
+// Self-contained WebGL2 repro for intermittent one-frame dropped draws seen on
+// Chrome's ANGLE D3D11 backend under GPU contention (NVIDIA). No frameworks, no assets,
+// no captured data. It mimics the STRUCTURE of a 2D deferred-lit game frame:
+//   - a streaming vertex pool (large buffers, bufferSubData at an advancing cursor,
+//     drawArrays with non-zero first) instead of one static buffer
+//   - a 1024x1024 shadow pass built from many small draws
+//   - per-light 256x256 targets with a blitFramebuffer ping-pong
+//   - a 1024x1024 emissive pass, then a composite to the default framebuffer
+//   - per-draw state changes (blend enable/func/equation, sampler params, uniforms)
+// Every frame is verified: the backbuffer AND every render target are read back and
+// hashed, and compared against the modal (most common) hash for that frame index. The
+// content is deterministic per frame index, so ANY mismatch means the GPU produced
+// different pixels from identical, error-free commands => dropped/altered work.
+//
+// URL knobs: ?draws=1300 &lights=8 &blits=11 &emissive=300 &frames=8
+//            &burn=4 &heat=500   (in-page contention)  &glitch=0  (self-test injector)
+//            &flush=0            (glFlush every N draws)
+(function () {
+	const q = new URLSearchParams(location.search);
+	const N = {
+		draws:    +(q.get('draws')    || 1300),   // shadow-pass draws per frame
+		lights:   +(q.get('lights')   || 8),      // per-light render targets
+		blits:    +(q.get('blits')    || 11),     // blit ping-pong iterations per light
+		emissive: +(q.get('emissive') || 300),    // emissive-pass draws per frame
+		frames:   +(q.get('frames')   || 8),      // distinct animation frames in the loop
+		burn:     +(q.get('burn')     || 0),
+		heat:     +(q.get('heat')     || 500),
+		glitch:   +(q.get('glitch')   || 0),      // inject a dropped group every N frames
+		flush:    +(q.get('flush')    || 0),      // glFlush every N draws (0 = never)
+		// ingredients the real game's stream has that a naive mimic lacks. structure
+		// alone did NOT reproduce, so these close the measured gaps one at a time:
+		uniforms: +(q.get('uniforms') || 0),      // extra uniformMatrix4fv per draw (game: ~3/draw)
+		queries:  +(q.get('queries')  || 0),      // getParameter(FRAMEBUFFER_BINDING) per draw (game: ~2/draw)
+		textures: +(q.get('textures') || 1),      // distinct 512^2 textures cycled across draws
+		bigbatch: +(q.get('bigbatch') || 0),      // every Nth draw submits 8192 verts (terrain batches)
+	};
+	if (q.get('real')) { N.uniforms = 3; N.queries = 2; N.textures = 24; N.bigbatch = 40; }
+	document.getElementById('cfg').textContent =
+		'draws/frame ' + N.draws + ' · lights ' + N.lights + ' · blits/light ' + N.blits
+		+ ' · emissive ' + N.emissive + ' · loop frames ' + N.frames
+		+ ' · burn ' + N.burn + ' · flush ' + (N.flush || 'off')
+		+ ' | uniforms/draw ' + N.uniforms + ' · queries/draw ' + N.queries
+		+ ' · textures ' + N.textures + ' · bigbatch ' + (N.bigbatch || 'off');
+
+	const hud = document.getElementById('hud');
+	const canvas = document.getElementById('c');
+	const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+	if (!gl) { hud.textContent = 'no webgl2'; return; }
+
+	// ---------- shaders ----------
+	function sh(type, src) {
+		const s = gl.createShader(type);
+		gl.shaderSource(s, src); gl.compileShader(s);
+		if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+		return s;
+	}
+	const prog = gl.createProgram();
+	gl.attachShader(prog, sh(gl.VERTEX_SHADER, `#version 300 es
+		layout(location=0) in vec2 aPos;
+		layout(location=1) in vec2 aUV;
+		layout(location=2) in vec4 aColor;
+		uniform mat4 uMVP;
+		out vec2 vUV; out vec4 vColor;
+		void main(){ vUV=aUV; vColor=aColor; gl_Position=uMVP*vec4(aPos,0.0,1.0); }`));
+	gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `#version 300 es
+		precision highp float;
+		in vec2 vUV; in vec4 vColor;
+		uniform sampler2D uTex; uniform sampler2D uTex2; uniform int uFlags;
+		out vec4 o;
+		void main(){
+			vec4 t = texture(uTex, vUV);
+			if (uFlags == 1) t *= texture(uTex2, vUV);
+			o = t * vColor;
+		}`));
+	gl.linkProgram(prog);
+	if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { hud.textContent = gl.getProgramInfoLog(prog); return; }
+	gl.useProgram(prog);
+	const uMVP = gl.getUniformLocation(prog, 'uMVP');
+	const uTex = gl.getUniformLocation(prog, 'uTex');
+	const uTex2 = gl.getUniformLocation(prog, 'uTex2');
+	const uFlags = gl.getUniformLocation(prog, 'uFlags');
+
+	// ---------- textures / render targets ----------
+	function makeTex(w, h, pixels) {
+		const t = gl.createTexture();
+		gl.bindTexture(gl.TEXTURE_2D, t);
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels || null);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+		return t;
+	}
+	function makeTarget(size) {
+		const tex = makeTex(size, size, null);
+		const fbo = gl.createFramebuffer();
+		gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+		gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+		if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
+			console.warn('incomplete fbo at size ' + size);
+		return { tex: tex, fbo: fbo, size: size };
+	}
+	// a small procedural atlas (stand-in for the tile sheet)
+	const atlasPix = new Uint8Array(64 * 64 * 4);
+	for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+		const i = (y * 64 + x) * 4;
+		atlasPix[i] = (x * 4) & 255; atlasPix[i + 1] = (y * 4) & 255;
+		atlasPix[i + 2] = ((x ^ y) * 4) & 255; atlasPix[i + 3] = 255;
+	}
+	const atlas = makeTex(64, 64, atlasPix);
+	const white = makeTex(1, 1, new Uint8Array([255, 255, 255, 255]));
+
+	// a pool of distinct large textures: the game binds dozens of 1024^2 tile sheets and
+	// font pages, this mimic originally reused one 64^2 atlas
+	const texPool = [atlas];
+	if (N.textures > 1) {
+		const S = 512, px = new Uint8Array(S * S * 4);
+		for (let t = 1; t < N.textures; t++) {
+			for (let i = 0; i < px.length; i += 4) {
+				px[i] = (i + t * 37) & 255; px[i + 1] = (i >> 8) & 255;
+				px[i + 2] = (t * 53) & 255; px[i + 3] = 255;
+			}
+			texPool.push(makeTex(S, S, px));
+		}
+	}
+
+	const shadowRT = makeTarget(1024);
+	const emissiveRT = makeTarget(1024);
+	const finalRT = makeTarget(1024);
+	const swap1024 = makeTarget(1024);
+	const lightRT = makeTarget(256);
+	const swap256 = makeTarget(256);
+	const targets = [shadowRT, emissiveRT, finalRT, lightRT];
+
+	// ---------- streaming vertex pool (mirrors the engine's append-only pool) ----------
+	const STRIDE = 32;                       // pos2 + uv2 + rgba4 floats = 8 floats
+	const POOL_BYTES = 8 * 1024 * 1024;
+	const POOL_COUNT = 4;
+	const pools = [];
+	for (let i = 0; i < POOL_COUNT; i++) {
+		const buf = gl.createBuffer();
+		gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+		gl.bufferData(gl.ARRAY_BUFFER, POOL_BYTES, gl.DYNAMIC_DRAW);
+		const vao = gl.createVertexArray();
+		gl.bindVertexArray(vao);
+		gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, STRIDE, 0);
+		gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, STRIDE, 8);
+		gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE, 16);
+		pools.push({ buf: buf, vao: vao, cursor: 0 });
+	}
+	let poolIdx = 0;
+	const scratch = new Float32Array(8 * 6);          // one quad = 6 verts
+	const bigScratch = new Float32Array(8 * 8190);   // terrain-sized batch
+	function uploadQuad(x, y, s, r, g, b, a, u0, v0, vertCount) {
+		const verts = vertCount || 6;
+		const bytes = STRIDE * verts;
+		const p = pools[poolIdx];
+		if (p.cursor + bytes > POOL_BYTES) {           // wrap to the next buffer
+			poolIdx = (poolIdx + 1) % POOL_COUNT;
+			pools[poolIdx].cursor = 0;
+		}
+		const pool = pools[poolIdx];
+		const pts = [[0, 0], [1, 0], [0, 1], [1, 0], [1, 1], [0, 1]];
+		const buf = (verts === 6) ? scratch : bigScratch.subarray(0, verts * 8);
+		for (let i = 0; i < verts; i++) {
+			const o = i * 8, pt = pts[i % 6], j = (i / 6) | 0;
+			buf[o] = x + pt[0] * s + (j % 32) * 3; buf[o + 1] = y + pt[1] * s + ((j / 32) | 0) * 3;
+			buf[o + 2] = u0 + pt[0] * 0.25; buf[o + 3] = v0 + pt[1] * 0.25;
+			buf[o + 4] = r; buf[o + 5] = g; buf[o + 6] = b; buf[o + 7] = a;
+		}
+		gl.bindBuffer(gl.ARRAY_BUFFER, pool.buf);
+		gl.bufferSubData(gl.ARRAY_BUFFER, pool.cursor, buf);
+		const first = pool.cursor / STRIDE;
+		pool.cursor += bytes;
+		gl.bindVertexArray(pool.vao);
+		return first;
+	}
+
+	// ---------- per-draw state churn, as the engine emits it ----------
+	let drawsSinceFlush = 0, drawCounter = 0, skipFrom = -1, skipTo = -1;
+	let curMVP = new Float32Array(16);
+	function drawQuad(x, y, s, col, tex, blendMode) {
+		const injected = (drawCounter >= skipFrom && drawCounter < skipTo);
+		const nth = drawCounter;
+		drawCounter++;
+		if (injected) return;                          // deliberate drop (self-test)
+		// per-draw uniform matrices: the game recomputes and uploads ~3 per draw
+		// (world-view-proj + uv matrix); this mimic originally set one per target switch.
+		// re-upload the CURRENT matrix so rendering stays identical.
+		for (let u = 0; u < N.uniforms; u++) gl.uniformMatrix4fv(uMVP, false, curMVP);
+		// per-draw state queries: the engine's feedback guard reads the current fbo
+		// binding before every draw (a gpu-process round trip in chrome)
+		for (let k = 0; k < N.queries; k++) gl.getParameter(gl.FRAMEBUFFER_BINDING);
+		gl.enable(gl.BLEND);
+		if (blendMode === 1) { gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.blendEquation(gl.FUNC_ADD); }
+		else if (blendMode === 2) { gl.blendFunc(gl.ZERO, gl.SRC_COLOR); gl.blendEquation(gl.FUNC_ADD); }
+		else { gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.blendEquation(gl.FUNC_ADD); }
+		// cycle through the texture pool for non-render-target draws, like a game binding
+		// many different tile sheets and font pages across a frame
+		const useTex = (tex === atlas && texPool.length > 1) ? texPool[nth % texPool.length] : tex;
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, useTex);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.uniform1i(uTex, 0);
+		gl.activeTexture(gl.TEXTURE1);
+		gl.bindTexture(gl.TEXTURE_2D, white);
+		gl.uniform1i(uTex2, 1);
+		gl.uniform1i(uFlags, 0);
+		gl.activeTexture(gl.TEXTURE0);
+		// terrain-style big batches: the game flushes up to 8192 verts in one draw, this
+		// mimic submitted 6 every time
+		const vc = (N.bigbatch > 0 && (nth % N.bigbatch) === 0) ? 8190 : 6;
+		const first = uploadQuad(x, y, s, col[0], col[1], col[2], col[3], (x % 4) * 0.25, (y % 4) * 0.25, vc);
+		gl.drawArrays(gl.TRIANGLES, first, vc);
+		if (N.flush > 0 && ++drawsSinceFlush >= N.flush) { drawsSinceFlush = 0; gl.flush(); }
+	}
+
+	function ortho(w, h) { return new Float32Array([2 / w, 0, 0, 0,  0, 2 / h, 0, 0,  0, 0, 1, 0,  -1, -1, 0, 1]); }
+	function bindTarget(rt) {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, rt ? rt.fbo : null);
+		const w = rt ? rt.size : canvas.width, h = rt ? rt.size : canvas.height;
+		gl.viewport(0, 0, w, h);
+		curMVP = ortho(w, h);
+		gl.uniformMatrix4fv(uMVP, false, curMVP);
+	}
+
+	// ---------- one frame of the mimicked pipeline ----------
+	function renderFrame(fi) {
+		const t = fi / N.frames;
+		// 1. shadow pass: many small draws into a 1024^2 target
+		bindTarget(shadowRT);
+		gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+		for (let i = 0; i < N.draws; i++) {
+			const a = i * 0.37 + t * 6.283;
+			drawQuad((i * 53) % 1000 + Math.sin(a) * 6, (i * 97) % 1000 + Math.cos(a) * 6, 24,
+				[0.2, 0.2, 0.25, 1], atlas, 0);
+		}
+		// 2. lights: small target + blit ping-pong, composited into the final target
+		gl.bindFramebuffer(gl.FRAMEBUFFER, finalRT.fbo);
+		gl.viewport(0, 0, finalRT.size, finalRT.size);
+		gl.clearColor(0.05, 0.05, 0.08, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+		for (let L = 0; L < N.lights; L++) {
+			bindTarget(lightRT);
+			gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+			drawQuad(20 + L * 7, 20 + L * 11, 200, [1, 0.9, 0.7, 1], shadowRT.tex, 0);
+			for (let b = 0; b < N.blits; b++) {
+				gl.bindFramebuffer(gl.READ_FRAMEBUFFER, lightRT.fbo);
+				gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, swap256.fbo);
+				gl.blitFramebuffer(0, 0, 256, 256, 0, 0, 256, 256, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+				bindTarget(lightRT);
+				drawQuad(0, 0, 256, [1, 1, 1, 1], swap256.tex, 1);
+			}
+			bindTarget(finalRT);
+			drawQuad((L * 120) % 800, (L * 90) % 800, 300, [1, 1, 1, 1], lightRT.tex, 1);
+		}
+		// 3. emissive pass into its own 1024^2 target, then a blur-ish blit ping-pong
+		bindTarget(emissiveRT);
+		gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+		for (let i = 0; i < N.emissive; i++) {
+			const a = i * 0.91 + t * 6.283;
+			drawQuad((i * 131) % 1000 + Math.sin(a) * 10, (i * 71) % 1000, 40, [1, 0.6, 0.2, 1], atlas, 1);
+		}
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, emissiveRT.fbo);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, swap1024.fbo);
+		gl.blitFramebuffer(0, 0, 1024, 1024, 0, 0, 1024, 1024, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+		bindTarget(emissiveRT);
+		drawQuad(0, 0, 1024, [1, 1, 1, 1], swap1024.tex, 0);
+		// 4. composite to the backbuffer + some ui quads
+		bindTarget(null);
+		gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+		drawQuad(0, 0, canvas.height, [1, 1, 1, 1], finalRT.tex, 2);
+		drawQuad(0, 0, canvas.height, [1, 1, 1, 1], emissiveRT.tex, 1);
+		for (let i = 0; i < 40; i++)
+			drawQuad(20 + i * 12, 20 + (i % 5) * 12 + Math.sin(t * 6.283 + i) * 3, 10, [1, 1, 1, 1], atlas, 0);
+	}
+
+	// ---------- verification ----------
+	function hash(u8) {
+		let h = 0x811c9dc5;
+		for (let i = 0; i < u8.length; i += 4) { h ^= u8[i]; h = Math.imul(h, 0x01000193); }
+		return h >>> 0;
+	}
+	const back = new Uint8Array(canvas.width * canvas.height * 4);
+	const rtBuf = new Uint8Array(512 * 512 * 4);
+	const counts = []; for (let i = 0; i < N.frames; i++) counts.push(new Map());
+	let cycle = 0, fi = 0, misses = 0, injectedChecked = 0, injectedDetected = 0, lastMiss = '';
+
+	function tick() {
+		// self-test: deliberately drop a group of draws every N.glitch frames
+		const doInject = N.glitch > 0 && (cycle * N.frames + fi) % N.glitch === 0 && cycle > 0;
+		drawCounter = 0;
+		skipFrom = doInject ? (((cycle * 37 + fi * 13) % Math.max(1, N.draws - 20))) : -1;
+		skipTo = doInject ? skipFrom + 16 : -1;
+
+		renderFrame(fi);
+
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, back);
+		let h = hash(back);
+		for (const rt of targets) {
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, rt.fbo);
+			const s = Math.min(512, rt.size);
+			gl.readPixels(0, 0, s, s, gl.RGBA, gl.UNSIGNED_BYTE, rtBuf);
+			h = Math.imul(h ^ hash(rtBuf.subarray(0, s * s * 4)), 0x01000193) >>> 0;
+		}
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+
+		const m = counts[fi];
+		m.set(h, (m.get(h) || 0) + 1);
+		let modal = h, mc = 0;
+		for (const e of m) if (e[1] > mc) { mc = e[1]; modal = e[0]; }
+		const differs = (h !== modal);
+		if (cycle > 0 && doInject) { injectedChecked++; if (differs) injectedDetected++; }
+		else if (cycle > 0 && differs) {
+			misses++; lastMiss = 'cycle ' + cycle + ' frame ' + fi;
+			console.log('MISS ' + lastMiss + ' hash ' + h.toString(16) + ' modal ' + modal.toString(16));
+		}
+
+		fi++; if (fi >= N.frames) { fi = 0; cycle++; }
+		const err = gl.getError();
+		if (err) console.warn('GL ERROR 0x' + err.toString(16));
+		hud.textContent = 'cycle ' + cycle + ' MISSES ' + misses
+			+ (cycle ? ' (' + (misses / cycle).toFixed(2) + '/cycle)' : '')
+			+ (lastMiss ? ' last: ' + lastMiss : '')
+			+ (injectedChecked ? ' | self-test detected ' + injectedDetected + '/' + injectedChecked : '');
+		hud.className = misses ? 'bad' : '';
+		window.__stats = { cycle: cycle, misses: misses, injectedChecked: injectedChecked, injectedDetected: injectedDetected };
+		requestAnimationFrame(tick);
+	}
+	requestAnimationFrame(tick);
+
+	// ---------- optional in-page contention ----------
+	for (let b = 0; b < N.burn; ++b) {
+		const c2 = document.createElement('canvas');
+		c2.width = 1920; c2.height = 1080;
+		c2.style.cssText = 'position:fixed;right:0;bottom:0;width:8px;height:8px;opacity:.5;';
+		document.body.appendChild(c2);
+		const g2 = c2.getContext('webgl2');
+		if (!g2) break;
+		const vs2 = g2.createShader(g2.VERTEX_SHADER);
+		g2.shaderSource(vs2, '#version 300 es\nvoid main(){gl_Position=vec4(float(gl_VertexID%2)*4.-1.,float(gl_VertexID/2)*4.-1.,0,1);}');
+		g2.compileShader(vs2);
+		const fs2 = g2.createShader(g2.FRAGMENT_SHADER);
+		g2.shaderSource(fs2, '#version 300 es\nprecision highp float;out vec4 o;uniform float t;void main(){float v=t;for(int i=0;i<' + Math.max(1, N.heat | 0) + ';++i)v=sin(v*1.37+float(i));o=vec4(v);}');
+		g2.compileShader(fs2);
+		const p2 = g2.createProgram();
+		g2.attachShader(p2, vs2); g2.attachShader(p2, fs2); g2.linkProgram(p2); g2.useProgram(p2);
+		const l2 = g2.getUniformLocation(p2, 't');
+		(function burn(t) {
+			g2.uniform1f(l2, t * 0.001);
+			for (let i = 0; i < 8; ++i) g2.drawArrays(g2.TRIANGLES, 0, 3);
+			g2.flush();
+			requestAnimationFrame(burn);
+		})(0);
+	}
+})();
+</script>
+</body>
+</html>

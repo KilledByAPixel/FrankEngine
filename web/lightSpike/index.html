@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Frank Engine lighting spike</title>
+<style>
+	body { background: #111; color: #999; font: 13px monospace; margin: 0;
+	       display: flex; flex-direction: column; min-height: 100vh;
+	       align-items: center; justify-content: center; }
+	canvas { width: 800px; height: 600px; background: #000; display: block; }
+	p { margin: 10px 0 0 0; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="800" height="600"></canvas>
+<p>keys: 1 diffuse &middot; 2 normals &middot; 3 specular &middot; 4 shadow map &middot; 5 final &middot; console (F12) shows diagnostics</p>
+<script>var Module = { canvas: document.getElementById('canvas') };</script>
+<script src="build/lightSpike.js"></script>
+</body>
+</html>

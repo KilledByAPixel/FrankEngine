@@ -1,0 +1,638 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GL replay - flicker repro</title>
+<style>
+	body { background: #111; color: #9c9; font: 13px monospace; margin: 0; padding: 10px;
+	       display: flex; flex-direction: column; align-items: center; }
+	canvas#canvas { width: min(1000px, 90vw); background: #000; display: block; }
+	#hud { margin: 8px 0; }
+	#hud.bad { color: #f66; font-weight: bold; }
+	#table { white-space: pre; margin-top: 8px; color: #cc9; }
+	.done { color: #6f6; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hud">drop / choose a piroot.gltrace.json (or ?file=name.json served next to this page)</div>
+<input type="file" id="file" accept=".json">
+<div id="table"></div>
+<script>
+// Standalone replayer for glTrace.js captures: replays the game's exact recorded GL
+// command stream with ZERO game code, verifying every frame against the modal (most
+// common) hash for that frame index. Any MISS = dropped/altered draws on the GPU.
+//
+//   live mode  (default)  loop forever, HUD shows running miss count
+//   ?bisect              run a fixed battery of filter configs back-to-back and
+//                        download bisectResults.json at the end
+//
+// filters (live mode, via query params; bisect mode has its own list):
+//   ?frames=a[,b]  only frames a..b     ?drop=n1,n2   skip those gl calls
+//   ?cmdcap=N[&cmdtail=K]  first N (+ last K) commands per frame
+//   ?drawmod=N     keep every Nth drawArrays
+//   ?burn=N[&heat=M]  in-page gpu contention
+(function () {
+	const hud = document.getElementById('hud');
+	const tableEl = document.getElementById('table');
+	const fileInput = document.getElementById('file');
+	const q = new URLSearchParams(location.search);
+
+	function loadText(text) {
+		hud.textContent = 'parsing ' + (text.length / 1048576).toFixed(0) + ' MB...';
+		setTimeout(function () {
+			const T = JSON.parse(text);
+			const bins = T.bins.map(function (s) {
+				const b = atob(s);
+				const u = new Uint8Array(b.length);
+				for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+				return u;
+			});
+			start(T, bins);
+		}, 10);
+	}
+	fileInput.onchange = function () { fileInput.files[0].text().then(loadText); };
+	if (q.get('file'))
+		fetch(q.get('file')).then(function (r) { return r.text(); }).then(loadText)
+			.catch(function (e) { hud.textContent = 'fetch failed: ' + e; });
+
+	function start(T, bins) {
+		fileInput.style.display = 'none';
+
+		// split the recorded stream into setup (pre-first-frame) and per-frame lists
+		const setup = [];
+		const allFrames = [];
+		let cur = null;
+		for (const c of T.cmds) {
+			if (typeof c === 'number') { cur = []; allFrames.push(cur); }
+			else (cur || setup).push(c);
+		}
+		console.log('replay: setup ' + setup.length + ' cmds, ' + allFrames.length + ' frames, ' + bins.length + ' bins');
+
+		const viewCtor = { Uint8Array: Uint8Array, Int8Array: Int8Array, Uint8ClampedArray: Uint8ClampedArray,
+			Uint16Array: Uint16Array, Int16Array: Int16Array, Uint32Array: Uint32Array, Int32Array: Int32Array,
+			Float32Array: Float32Array, Float64Array: Float64Array };
+
+		function buildFrames(cfg) {
+			let frames = allFrames;
+			// frameSel: explicit frame indices (used by the minimizer)
+			if (cfg.frameSel) frames = cfg.frameSel.map(function (i) { return allFrames[i]; });
+			if (cfg.frames) frames = frames.slice(cfg.frames[0], cfg.frames[1] + 1);
+			// segKeep: keep only these segment indices of each frame, out of cfg.segCount
+			// equal slices (the minimizer's chopping unit). commands are stateful, so we
+			// always keep contiguous slices rather than scattering individual calls.
+			if (cfg.segKeep && cfg.segCount) {
+				const keep = new Set(cfg.segKeep);
+				frames = frames.map(function (fr) {
+					const n = fr.length, out = [];
+					for (let s = 0; s < cfg.segCount; s++) {
+						if (!keep.has(s)) continue;
+						const a = Math.floor(n * s / cfg.segCount), b = Math.floor(n * (s + 1) / cfg.segCount);
+						for (let i = a; i < b; i++) out.push(fr[i]);
+					}
+					return out;
+				});
+			}
+			if (cfg.drop && cfg.drop.length) {
+				const d = new Set(cfg.drop);
+				frames = frames.map(function (fr) { return fr.filter(function (c) { return !d.has(c[0]); }); });
+			}
+			if (cfg.cmdcap) {
+				const cap = cfg.cmdcap, tail = cfg.cmdtail || 0;
+				frames = frames.map(function (fr) {
+					if (fr.length <= cap + tail) return fr;
+					return tail ? fr.slice(0, cap).concat(fr.slice(-tail)) : fr.slice(0, cap);
+				});
+			}
+			if (cfg.drawmod > 1) {
+				frames = frames.map(function (fr) {
+					let i = 0;
+					return fr.filter(function (c) { return c[0] !== 'drawArrays' || (i++ % cfg.drawmod) === 0; });
+				});
+			}
+			// submission-structure knobs: INSERT commands rather than remove them, so the
+			// rendered image is bit-identical and sensitivity cannot be affected.
+			// flushEvery=N -> gl.flush() every N commands; finishEnd -> gl.finish() at
+			// end of frame. these change only how work is handed to the driver.
+			if (cfg.flushEvery > 0) {
+				frames = frames.map(function (fr) {
+					const o = [];
+					for (let i = 0; i < fr.length; i++) {
+						o.push(fr[i]);
+						if ((i + 1) % cfg.flushEvery === 0) o.push(['flush', []]);
+					}
+					return o;
+				});
+			}
+			if (cfg.finishEnd)
+				frames = frames.map(function (fr) { return fr.concat([['finish', []]]); });
+			// dedupe: emulate a STATE CACHE - drop calls that re-set a value already in
+			// effect. this is the realistic engine fix (vs. deleting the calls outright),
+			// so a config that goes quiet here is directly implementable in webRender.cpp
+			if (cfg.dedupe && cfg.dedupe.length) {
+				const ded = new Set(cfg.dedupe);
+				const state = new Map();
+				frames = frames.map(function (fr) {
+					return fr.filter(function (c) {
+						if (!ded.has(c[0])) return true;
+						// enable/disable share a key per capability; the rest key by call name
+						const key = (c[0] === 'enable' || c[0] === 'disable') ? ('cap' + c[1][0]) : c[0];
+						const val = (c[0] === 'enable' || c[0] === 'disable') ? c[0] : JSON.stringify(c[1]);
+						if (state.get(key) === val) return false;
+						state.set(key, val);
+						return true;
+					});
+				});
+			}
+			return frames;
+		}
+
+		// each run gets a FRESH canvas + context so configs cannot contaminate each other
+		function freshContext() {
+			const old = document.getElementById('canvas');
+			const c = document.createElement('canvas');
+			c.id = 'canvas';
+			c.width = T.meta.width || 1280;
+			c.height = T.meta.height || 720;
+			old.parentNode.replaceChild(c, old);
+			try {
+				const ext = old.getContext('webgl2');
+				const lose = ext && ext.getExtension('WEBGL_lose_context');
+				if (lose) lose.loseContext();
+			} catch (e) { /* first run: no previous context */ }
+			return c.getContext('webgl2', T.meta.attrs || undefined);
+		}
+
+		// hash every pixel's red channel (step 4). the old step-16 sampling only caught
+		// 45% of deliberately injected single-draw drops; denser sampling raises the
+		// detector's sensitivity, which is what makes a "clean" verdict trustworthy
+		function hashRGBA(u8) {
+			let h = 0x811c9dc5;
+			for (let i = 0; i < u8.length; i += 4) { h ^= u8[i]; h = Math.imul(h, 0x01000193); }
+			return h >>> 0;
+		}
+
+		// run one config. durationMs = Infinity for live mode. resolves with stats.
+		function run(cfg, durationMs, label) {
+			return new Promise(function (resolve) {
+				const frames = buildFrames(cfg);
+				const gl = freshContext();
+				if (!gl) { resolve({ error: 'no webgl2 context' }); return; }
+				const objs = [null];
+				let execErrors = 0;
+
+				// ?proxy=1 : redirect every draw aimed at the DEFAULT framebuffer into an
+				// offscreen target of the same size, then present with one blit at frame
+				// end. the default framebuffer is a dxgi swap-chain surface on chrome/d3d11,
+				// handled by the compositor quite differently from an offscreen texture -
+				// if the losses are specific to it, this makes them vanish, and the engine
+				// fix is "render to a target, present once".
+				let proxy = null;
+				if (cfg.proxy) {
+					const ptex = gl.createTexture();
+					gl.bindTexture(gl.TEXTURE_2D, ptex);
+					gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.drawingBufferWidth, gl.drawingBufferHeight,
+						0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+					gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+					proxy = gl.createFramebuffer();
+					gl.bindFramebuffer(gl.FRAMEBUFFER, proxy);
+					gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, ptex, 0);
+					gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+					console.log('replay: default-framebuffer draws redirected to an offscreen proxy');
+				}
+				function dec(a) {
+					if (a === null || typeof a !== 'object') return a;
+					if (Array.isArray(a)) return a;
+					if ('o' in a) return objs[a.o];
+					if ('b' in a) {
+						const u = bins[a.b];
+						const C = viewCtor[a.t] || Uint8Array;
+						return new C(u.buffer, u.byteOffset, u.byteLength / C.BYTES_PER_ELEMENT);
+					}
+					if ('rp' in a) return new Uint8Array(a.rp);
+					if ('img' in a) {
+						const u = bins[a.img];
+						return new ImageData(new Uint8ClampedArray(u.buffer, u.byteOffset, u.byteLength), a.w, a.h);
+					}
+					return a;
+				}
+				// track texture sizes and fbo attachments so misses can be attributed to a
+				// named pass ("1024x1024 target") instead of an opaque index
+				const texSize = new Map(), fboTex = new Map();
+				let boundTex = null, boundFBO = null;
+				function exec(c) {
+					const fn = gl[c[0]];
+					if (!fn) { if (execErrors++ < 5) console.warn('replay: unknown fn ' + c[0]); return; }
+					let args;
+					try { args = c[1].map(dec); }
+					catch (e) { if (execErrors++ < 10) console.warn('replay: decode failed ' + c[0], e); return; }
+					// swap-chain redirect: any bind of the default framebuffer goes to the proxy
+					if (proxy && c[0] === 'bindFramebuffer' && args[1] === null) args[1] = proxy;
+					let r;
+					try { r = fn.apply(gl, args); }
+					catch (e) { if (execErrors++ < 10) console.warn('replay: ' + c[0] + ' threw', e); return; }
+					if (c.length > 2 && c[2]) objs[c[2]] = r;
+					switch (c[0]) {
+						case 'bindTexture': boundTex = args[1]; break;
+						case 'texImage2D':
+							if (args.length >= 9 && boundTex) texSize.set(boundTex, args[3] + 'x' + args[4]);
+							break;
+						case 'bindFramebuffer': boundFBO = args[1]; break;
+						case 'framebufferTexture2D': if (boundFBO) fboTex.set(boundFBO, args[3]); break;
+					}
+				}
+				for (const c of setup) exec(c);
+
+				// glitch injection (sensitivity control): on every Nth executed frame,
+				// deliberately skip one draw. a config that reports ZERO misses WITH
+				// glitching is blind, and its clean result means nothing.
+				const drawIdx = cfg.glitch
+					? frames.map(function (fr) {
+						const a = [];
+						for (let i = 0; i < fr.length; i++) if (fr[i][0] === 'drawArrays') a.push(i);
+						return a;
+					})
+					: null;
+				// sensitivity accounting: of the frames where we DELIBERATELY dropped a
+				// draw, how many did the verifier actually flag? a config that misses
+				// injected drops is blind, and its clean result proves nothing. (the
+				// crude all-frames-identical BLIND check is not enough: a config can
+				// still animate while being blind to drops in offscreen passes.)
+				let ticks = 0, injected = 0, injectedChecked = 0, injectedDetected = 0;
+
+				// hash EVERY render target, not just the backbuffer. the flicker lives in
+				// the offscreen shadow/light passes, so a backbuffer-only detector goes
+				// blind whenever a filter reroutes or thins what reaches the screen - the
+				// artifact that produced false "fixed" verdicts in rounds 3-6.
+				// NOTE: every target hashed costs a synchronous readback, and readbacks are
+				// sync points that SUPPRESS the bug (same mechanism as the flush finding).
+				// hashing all 16 targets dropped the observed rate ~10x. cfg.hashOnly picks
+				// just the suspect sizes so attribution survives without smothering it.
+				const fbos = [];
+				if (cfg.hashFBOs !== false && typeof WebGLFramebuffer !== 'undefined') {
+					for (const o of objs) {
+						if (!(o instanceof WebGLFramebuffer)) continue;
+						if (cfg.hashOnly && (texSize.get(fboTex.get(o)) || '') !== cfg.hashOnly) continue;
+						fbos.push(o);
+					}
+				}
+				// read a large window of each target: a 256px corner of a 1024px shadow map
+				// covers 6% of it and misses most dropped draws
+				const fboSize = 512;
+				const fboBuf = new Uint8Array(fboSize * fboSize * 4);
+				if (label) console.log('replay: ' + label + ' hashing ' + fbos.length + ' render targets');
+
+				// per-target verification: hash the backbuffer and each render target
+				// SEPARATELY so a miss can be attributed to the pass that lost the work
+				const targetCount = 1 + fbos.length;
+				const counts = frames.map(function () {
+					const a = []; for (let i = 0; i < targetCount; i++) a.push(new Map());
+					return a;
+				});
+				const missByTarget = new Array(targetCount).fill(0);
+				const targetLabel = new Array(targetCount).fill('?');
+				targetLabel[0] = 'backbuffer';
+				const rb = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+				const t0 = performance.now();
+				let cycle = 0, f = 0, misses = 0, lastMiss = '';
+				(function tick() {
+					if (frames.length === 0) { resolve({ error: 'no frames' }); return; }
+					const fr = frames[f];
+					// drop a contiguous GROUP of draws, mimicking the real failure (which
+					// kills adjacent commands together). a single-draw drop is a far
+					// harsher probe than the bug itself and understated sensitivity.
+					const skip = new Set();
+					if (drawIdx && ticks % cfg.glitch === 0 && drawIdx[f].length) {
+						const g = Math.max(1, cfg.glitchSize || 16);
+						const start = (ticks * 37) % drawIdx[f].length;
+						for (let k = 0; k < g && start + k < drawIdx[f].length; k++)
+							skip.add(drawIdx[f][start + k]);
+						injected++;
+					}
+					ticks++;
+					for (let i = 0; i < fr.length; i++) {
+						if (skip.has(i)) continue;
+						exec(fr[i]);
+					}
+					// present the proxy to the real backbuffer, then verify the proxy itself
+					if (proxy) {
+						gl.bindFramebuffer(gl.READ_FRAMEBUFFER, proxy);
+						gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+						gl.blitFramebuffer(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight,
+							0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+					}
+					const hs = new Array(targetCount);
+					gl.bindFramebuffer(gl.READ_FRAMEBUFFER, proxy);
+					gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, rb);
+					hs[0] = hashRGBA(rb);
+					for (let k = 0; k < fbos.length; k++) {
+						gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbos[k]);
+						gl.readPixels(0, 0, fboSize, fboSize, gl.RGBA, gl.UNSIGNED_BYTE, fboBuf);
+						hs[k + 1] = hashRGBA(fboBuf);
+						if (targetLabel[k + 1] === '?')
+							targetLabel[k + 1] = 'rt' + k + '[' + (texSize.get(fboTex.get(fbos[k])) || '?') + ']';
+					}
+					if (fbos.length) gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+					// a frame differs if ANY target does; the per-target tally localises the
+					// loss to a specific pass (shadow / light / emissive / composite)
+					let differs = false;
+					const cm = counts[f];
+					for (let k = 0; k < targetCount; k++) {
+						const mk = cm[k];
+						mk.set(hs[k], (mk.get(hs[k]) || 0) + 1);
+						let modalK = hs[k], mcK = 0;
+						for (const e of mk) if (e[1] > mcK) { mcK = e[1]; modalK = e[0]; }
+						if (hs[k] !== modalK) {
+							differs = true;
+							if (cycle > 0 && !skip.size) missByTarget[k]++;
+						}
+					}
+					const h = hs[0], modal = hs[0];
+					if (cycle > 0 && skip.size) {
+						injectedChecked++;
+						if (differs) injectedDetected++;
+					}
+					else if (cycle > 0 && differs) {
+						misses++;
+						const which = [];
+						for (let k = 0; k < targetCount; k++) {
+							const mk = cm[k];
+							let modalK = hs[k], mcK = 0;
+							for (const e of mk) if (e[1] > mcK) { mcK = e[1]; modalK = e[0]; }
+							if (hs[k] !== modalK) which.push(targetLabel[k]);
+						}
+						lastMiss = 'cycle ' + cycle + ' frame ' + f + ' in ' + which.join('+');
+						console.log('REPLAY MISS ' + lastMiss);
+					}
+					f++;
+					if (f >= frames.length) { f = 0; cycle++; }
+					const rate = cycle > 0 ? (misses / cycle).toFixed(2) : '-';
+					hud.textContent = (label ? label + ' | ' : '') + 'cycle ' + cycle + ' frame ' + f + '/' + frames.length
+						+ ' MISSES ' + misses + ' (' + rate + '/cycle)'
+						+ (lastMiss ? ' last: ' + lastMiss : '') + (execErrors ? ' execErrors ' + execErrors : '');
+					hud.className = misses ? 'bad' : '';
+					window.__replayStats = { cycle: cycle, misses: misses, frames: frames.length, execErrors: execErrors,
+						injectedChecked: injectedChecked, injectedDetected: injectedDetected,
+						missByTarget: missByTarget.slice(), targetLabel: targetLabel.slice() };
+					if (misses && (misses % 5) === 0) {
+						const parts = [];
+						for (let k = 0; k < targetCount; k++)
+							if (missByTarget[k]) parts.push(targetLabel[k] + '=' + missByTarget[k]);
+						tableEl.textContent = 'losses by render target:  ' + parts.join('   ');
+					}
+					if (performance.now() - t0 >= durationMs && cycle > 0) {
+						// BLIND check: if every frame index settled on the same modal hash the
+						// picture never changes, so a dropped draw could not be detected
+						const modals = new Set();
+						for (const mm of counts) {
+							let best = 0, bc = 0;
+							for (const e of mm) if (e[1] > bc) { bc = e[1]; best = e[0]; }
+							modals.add(best);
+						}
+						resolve({ misses: misses, cycles: cycle, rate: +(misses / cycle).toFixed(2),
+							distinctFrames: modals.size, blind: modals.size <= 1, execErrors: execErrors,
+							injectedGlitches: injected, injectedChecked: injectedChecked,
+							injectedDetected: injectedDetected,
+							sensitivity: injectedChecked ? +(injectedDetected / injectedChecked).toFixed(2) : null,
+							cmdsPerFrame: Math.round(frames.reduce(function (s, fx) { return s + fx.length; }, 0) / frames.length) });
+						return;
+					}
+					requestAnimationFrame(tick);
+				})();
+			});
+		}
+
+		// ---------------- bisect mode ----------------
+		if (q.has('bisect')) {
+			const secs = +(q.get('secs') || 90);
+			// round 4: blend-state churn was the only non-blind config that went to zero.
+			// isolate WHICH call matters, and test the realistic engine fix (state cache =
+			// dedupe) rather than deletion. glitch configs are sensitivity controls: they
+			// MUST report misses, otherwise that config cannot see drops at all.
+			// round 5: every config that read ZERO in round 4 also collapsed the image
+			// (113 -> 91 distinct frames), which smells like the detector going blind to
+			// drops in the offscreen lighting passes rather than the bug being fixed.
+			// so EVERY config here injects deliberate drops and reports what fraction the
+			// verifier caught. sensitivity < ~0.5 = that config cannot see the bug and its
+			// miss rate is meaningless.
+			// round 6: blend theory is dead (round 5: every "clean" blend config detected
+			// only 13% of injected drops = blind). the one surviving signal is that the
+			// rate scales with WORK PER FRAME, so test submission structure:
+			//   flush-*    INSERT gl.flush() mid-frame - image identical, sensitivity safe
+			//   finish-end drain the pipe once per frame
+			//   half/quarter-draws, no-uploads - re-run WITH the sensitivity control this
+			//   time, since round 3 measured them without one
+			const CONFIGS = [
+				['baseline', { glitch: 10 }],
+				['flush-every-2000', { flushEvery: 2000, glitch: 10 }],
+				['flush-every-500', { flushEvery: 500, glitch: 10 }],
+				['finish-per-frame', { finishEnd: true, glitch: 10 }],
+				['half-draws', { drawmod: 2, glitch: 10 }],
+				['quarter-draws', { drawmod: 4, glitch: 10 }],
+				['no-uploads', { drop: ['bufferSubData'], glitch: 10 }],
+				['baseline-again', { glitch: 10 }],
+			];
+			const out = [];
+			function render() {
+				let s = 'config              rate/cycle  sensitivity(detected/injected)  verdict\n';
+				// verdicts are RELATIVE to baseline's own sensitivity: a config only counts
+				// as clean if it detects injected drops about as well as baseline does
+				const baseSens = out.length && out[0].sensitivity ? out[0].sensitivity : null;
+				for (const r of out) {
+					let verdict = '';
+					if (r.error) verdict = 'ERROR ' + r.error;
+					else if (r.blind) verdict = 'BLIND - static image';
+					else if (r.sensitivity === null) verdict = 'no control run';
+					else if (baseSens && r.sensitivity < 0.4 * baseSens)
+						verdict = 'BLIND - detects only ' + Math.round(100 * r.sensitivity / baseSens) + '% of what baseline does';
+					else verdict = (r.rate === 0 ? 'CLEAN and sensitive <<<' : 'bug present');
+					s += (r.name + '                    ').slice(0, 20)
+						+ (r.error ? '' : ((r.rate + '          ').slice(0, 12)
+							+ ((r.sensitivity === null ? '-' : r.sensitivity + ' (' + r.injectedDetected + '/' + r.injectedChecked + ')')
+								+ '                                ').slice(0, 32)))
+						+ verdict + '\n';
+				}
+				tableEl.textContent = s;
+			}
+			(async function () {
+				for (let i = 0; i < CONFIGS.length; i++) {
+					const [name, cfg] = CONFIGS[i];
+					const r = await run(cfg, secs * 1000, '[' + (i + 1) + '/' + CONFIGS.length + '] ' + name);
+					r.name = name; r.cfg = cfg;
+					out.push(r); render();
+					console.log('BISECT ' + name + ': ' + JSON.stringify(r));
+				}
+				const payload = JSON.stringify({ secs: secs, ua: navigator.userAgent, results: out }, null, 1);
+				try {
+					const a = document.createElement('a');
+					a.href = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+					a.download = 'bisectResults.json';
+					a.click();
+				} catch (e) { console.warn('download failed', e); }
+				try { localStorage.setItem('bisectResults', payload); } catch (e) {}
+				hud.className = 'done';
+				hud.textContent = 'BISECT COMPLETE - bisectResults.json downloaded (also in localStorage)';
+				render();
+			})();
+			return;
+		}
+
+		// ---------------- minimize mode ----------------
+		// automatic delta-debugging: shrink the captured stream to the smallest subset
+		// that STILL reproduces, so the surviving commands ARE the answer to "what are we
+		// doing that triggers this". every candidate carries injected glitches, and a
+		// candidate that cannot detect them is rejected as blind rather than accepted as
+		// fixed - the trap that produced two false conclusions in earlier rounds.
+		if (q.has('minimize')) {
+			const secs = +(q.get('secs') || 45);
+			const G = +(q.get('glitch') || 10);
+			const minRate = +(q.get('minrate') || 1);
+			const log = [];
+			let baseSens = null;
+			function show(extra) {
+				tableEl.textContent = log.map(function (l) { return l; }).join('\n') + (extra ? '\n' + extra : '');
+			}
+			function reproduces(r) {
+				if (!r || r.error || r.blind) return false;
+				if (baseSens && (r.sensitivity === null || r.sensitivity < 0.4 * baseSens)) return false;
+				return r.rate >= minRate;
+			}
+			function note(label, r, kept) {
+				const s = (label + '                        ').slice(0, 26)
+					+ 'rate ' + (r.error ? 'ERR' : (r.rate + '     ').slice(0, 6))
+					+ ' sens ' + (r.sensitivity === null ? '-' : r.sensitivity)
+					+ ' cmds/frame ' + (r.cmdsPerFrame || '-')
+					+ (kept === undefined ? '' : ('  -> ' + (reproduces(r) ? 'STILL REPRODUCES (accept)' : 'no repro (revert)')));
+				log.push(s); show();
+				console.log('MINIMIZE ' + s);
+			}
+			(async function () {
+				const base = await run({ glitch: G }, secs * 1000, 'baseline');
+				baseSens = base.sensitivity;
+				note('baseline', base);
+				if (!(base.rate >= minRate)) {
+					log.push('');
+					log.push('BASELINE DOES NOT REPRODUCE at >= ' + minRate + '/cycle.');
+					log.push('Increase contention (video playing, ?burn=8) or lower ?minrate, then reload.');
+					show(); hud.className = 'done'; hud.textContent = 'minimize aborted - no baseline repro';
+					return;
+				}
+
+				// phase A: narrow the frame range by halving
+				let sel = allFrames.map(function (_, i) { return i; });
+				let shrunk = true;
+				while (sel.length > 2 && shrunk) {
+					shrunk = false;
+					const half = Math.ceil(sel.length / 2);
+					const cands = [sel.slice(0, half), sel.slice(half)];
+					for (const cand of cands) {
+						const r = await run({ frameSel: cand, glitch: G }, secs * 1000, 'frames x' + cand.length);
+						note('frames[' + cand[0] + '..' + cand[cand.length - 1] + '] (' + cand.length + ')', r, true);
+						if (reproduces(r)) { sel = cand; shrunk = true; break; }
+					}
+				}
+				log.push('>> minimal frame set: ' + sel.length + ' frames (' + sel[0] + '..' + sel[sel.length - 1] + ')');
+				show();
+
+				// phase B: chop each frame's commands into segments, drop what is not needed
+				let segCount = 2, keep = [0, 1];
+				for (let round = 0; round < 5; round++) {
+					// try dropping each segment individually at this granularity
+					let improved = true;
+					while (improved) {
+						improved = false;
+						for (const s of keep.slice()) {
+							const cand = keep.filter(function (x) { return x !== s; });
+							if (!cand.length) continue;
+							const r = await run({ frameSel: sel, segCount: segCount, segKeep: cand, glitch: G }, secs * 1000,
+								'seg ' + cand.length + '/' + segCount);
+							note('drop seg ' + s + '/' + segCount, r, true);
+							if (reproduces(r)) { keep = cand; improved = true; break; }
+						}
+					}
+					// refine granularity: each surviving segment splits in two
+					const next = [];
+					for (const s of keep) { next.push(s * 2); next.push(s * 2 + 1); }
+					segCount *= 2; keep = next;
+					log.push('>> granularity ' + segCount + ', keeping ' + keep.length + ' segments (~'
+						+ Math.round(100 * keep.length / segCount) + '% of each frame)');
+					show();
+				}
+
+				const final = await run({ frameSel: sel, segCount: segCount, segKeep: keep, glitch: G }, secs * 1000, 'final');
+				note('FINAL minimal repro', final);
+				const payload = JSON.stringify({
+					secs: secs, minRate: minRate, ua: navigator.userAgent,
+					baselineRate: base.rate, baselineSensitivity: base.sensitivity,
+					frameSel: sel, segCount: segCount, segKeep: keep,
+					finalRate: final.rate, finalSensitivity: final.sensitivity,
+					finalCmdsPerFrame: final.cmdsPerFrame, log: log,
+				}, null, 1);
+				try {
+					const a = document.createElement('a');
+					a.href = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+					a.download = 'minimizeResults.json';
+					a.click();
+				} catch (e) { console.warn('download failed', e); }
+				try { localStorage.setItem('minimizeResults', payload); } catch (e) {}
+				hud.className = 'done';
+				hud.textContent = 'MINIMIZE COMPLETE - minimizeResults.json downloaded';
+				show();
+			})();
+			return;
+		}
+
+		// ---------------- live mode ----------------
+		const cfg = {};
+		const fr = (q.get('frames') || '').split(',').filter(Boolean).map(Number);
+		if (fr.length) cfg.frames = [fr[0], fr.length > 1 ? fr[1] : fr[0]];
+		const drop = (q.get('drop') || '').split(',').filter(Boolean);
+		if (drop.length) cfg.drop = drop;
+		if (+q.get('cmdcap')) cfg.cmdcap = +q.get('cmdcap');
+		if (+q.get('cmdtail')) cfg.cmdtail = +q.get('cmdtail');
+		if (+q.get('drawmod')) cfg.drawmod = +q.get('drawmod');
+		const dedupe = (q.get('dedupe') || '').split(',').filter(Boolean);
+		if (dedupe.length) cfg.dedupe = dedupe;
+		if (+q.get('glitch')) cfg.glitch = +q.get('glitch');
+		if (+q.get('glitchSize')) cfg.glitchSize = +q.get('glitchSize');
+		if (q.get('nofbohash')) cfg.hashFBOs = false;
+		if (q.get('hashOnly')) cfg.hashOnly = q.get('hashOnly');
+		if (q.get('proxy')) cfg.proxy = true;
+		if (+q.get('flushEvery')) cfg.flushEvery = +q.get('flushEvery');
+		if (q.get('finishEnd')) cfg.finishEnd = true;
+		run(cfg, Infinity, null);
+	}
+
+	// ?burn=N[&heat=M] in-page gpu contention amplifier
+	(function () {
+		var n = +(q.get('burn') || 0);
+		var heat = Math.max(1, +(q.get('heat') || 500) | 0);
+		for (var b = 0; b < n; ++b) {
+			var c = document.createElement('canvas');
+			c.width = 1920; c.height = 1080;
+			c.style.cssText = 'position:fixed;right:0;bottom:0;width:8px;height:8px;opacity:.5;';
+			document.body.appendChild(c);
+			var gl = c.getContext('webgl2');
+			if (!gl) return;
+			var vs = gl.createShader(gl.VERTEX_SHADER);
+			gl.shaderSource(vs, '#version 300 es\nvoid main(){gl_Position=vec4(float(gl_VertexID%2)*4.-1.,float(gl_VertexID/2)*4.-1.,0,1);}');
+			gl.compileShader(vs);
+			var fs = gl.createShader(gl.FRAGMENT_SHADER);
+			gl.shaderSource(fs, '#version 300 es\nprecision highp float;out vec4 o;uniform float t;void main(){float v=t;for(int i=0;i<' + heat + ';++i)v=sin(v*1.37+float(i));o=vec4(v);}');
+			gl.compileShader(fs);
+			var p = gl.createProgram();
+			gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p); gl.useProgram(p);
+			var loc = gl.getUniformLocation(p, 't');
+			(function tick(t) {
+				gl.uniform1f(loc, t * 0.001);
+				for (var i = 0; i < 8; ++i) gl.drawArrays(gl.TRIANGLES, 0, 3);
+				gl.flush();
+				requestAnimationFrame(tick);
+			})(0);
+		}
+	})();
+})();
+</script>
+</body>
+</html>

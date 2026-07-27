@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>gpu contention generator</title>
+<style>
+	body { background: #222; color: #ccc; font-family: monospace; }
+	.spin { width: 220px; height: 220px; display: inline-block; margin: 8px;
+		background: linear-gradient(45deg, #f06, #06f, #0f6, #f60);
+		background-size: 400% 400%; animation: g 1.1s linear infinite, r 2.3s linear infinite; }
+	@keyframes g { 0% { background-position: 0% 0%; } 100% { background-position: 100% 100%; } }
+	@keyframes r { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<!-- gpu contention source for the flicker rig: a webgl canvas re-drawing thousands of
+     triangles per frame, css-animated gradients, and a "video" element playing a
+     captured canvas stream - approximates an ad-carrying portal page without media
+     files. open next to the game (or let host.html include it). -->
+<div>contention generator: webgl + css animation + canvas-stream video</div>
+<canvas id="gl" width="512" height="512"></canvas>
+<video id="vid" width="256" height="256" autoplay muted playsinline></video>
+<canvas id="c2d" width="256" height="256" style="display:none"></canvas>
+<div class="spin"></div><div class="spin"></div><div class="spin"></div>
+<script>
+const gl = document.getElementById('gl').getContext('webgl2');
+const vs = '#version 300 es\nlayout(location=0) in vec2 p; uniform float t; void main(){ float a = t + float(gl_InstanceID) * 0.37; gl_Position = vec4(p * 0.05 + vec2(cos(a), sin(a * 1.3)) * 0.9, 0.0, 1.0); }';
+const fs = '#version 300 es\nprecision mediump float; out vec4 o; uniform float t; void main(){ o = vec4(fract(t), 0.5, 1.0 - fract(t), 1.0); }';
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,1, -1,-1, 1,-1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const tLoc = gl.getUniformLocation(prog, 't');
+const c2d = document.getElementById('c2d').getContext('2d');
+document.getElementById('vid').srcObject = document.getElementById('c2d').captureStream(60);
+function frame(ms) {
+	const t = ms * 0.001;
+	gl.clearColor(0.1, 0.1, 0.15, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+	gl.uniform1f(tLoc, t);
+	// many small instanced draws, not one big one - draw COUNT is the contention
+	for (let i = 0; i < 300; ++i) {
+		gl.uniform1f(tLoc, t + i * 0.01);
+		gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 8);
+	}
+	c2d.fillStyle = 'hsl(' + ((t * 90) % 360) + ',80%,50%)';
+	c2d.fillRect(0, 0, 256, 256);
+	c2d.fillStyle = '#fff';
+	c2d.fillText('t=' + t.toFixed(1), 20, 128);
+	requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

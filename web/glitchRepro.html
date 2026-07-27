@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL2 dropped-draw repro (Chrome / ANGLE D3D11)</title>
+<style>
+	body { background:#111; color:#ddd; font:13px monospace; margin:10px; }
+	#log { white-space:pre; margin-top:8px; max-height:40vh; overflow:auto; }
+	canvas { border:1px solid #444; image-rendering:pixelated; }
+	b { color:#6cf; }
+	.bad { color:#f66; }
+	.good { color:#6f6; }
+</style>
+</head>
+<body>
+<!--
+	Minimal standalone reproduction of the Chrome/ANGLE-D3D11 dropped-draw bug.
+	NO wasm, no engine - plain WebGL2 in ~200 lines, so it can go straight into a
+	Chromium bug report and so workarounds can be tried by editing a URL.
+
+	The scene is COMPLETELY STATIC: the same draws, the same uniforms, the same
+	textures, every frame forever. So the correct output is bit-identical every
+	frame, and ANY frame-to-frame change is the bug. That is a far stricter
+	detector than anything possible in a real game.
+
+	Needs GPU contention to fire: open contention.html in another window, or play
+	a video. Params (all optional):
+	  ?fbos=4        offscreen render targets per frame
+	  &draws=24      textured draws into each target
+	  &size=256      target size
+	  &tex=8         distinct source textures
+	  &pingpong=1    bind a scratch texture before each real bind (workaround A)
+	  &fbopingpong=1 bounce through the default framebuffer on each target change (B)
+	  &finish=1      glFinish at end of frame (workaround C - expected slow)
+	  &nodetect=1    render only, no readback at all
+-->
+<div>
+	<b>WebGL2 dropped-draw repro.</b> Static scene - every frame must be identical.
+	Needs GPU contention (open <a href="contention.html" target="_blank" style="color:#6cf">contention.html</a> in another window).
+</div>
+<canvas id="view" width="512" height="512"></canvas>
+<div id="status">starting...</div>
+<div id="log"></div>
+<script>
+const P = new URLSearchParams(location.search);
+const num = (k, d) => { const v = parseInt(P.get(k)); return isNaN(v) ? d : v; };
+const CFG = {
+	fbos: num('fbos', 4), draws: num('draws', 24), size: num('size', 256),
+	tex: num('tex', 8), pingpong: num('pingpong', 0), fbopingpong: num('fbopingpong', 0),
+	finish: num('finish', 0), nodetect: num('nodetect', 0),
+	// ingredients the engine has that a plain webgl app does not. the engine reproduces
+	// at several events/sec while this page with default params does NOT, so whichever
+	// of these is required IS the answer to "why does nobody else hit this bug"
+	blend: num('blend', 0),    // churn blend state per draw (engine: ~150 real changes/frame)
+	stream: num('stream', 0),  // per-draw bufferSubData into a big DYNAMIC buffer, advancing
+	                           // offsets, drawn with a non-zero `first` (the engine's pool)
+	poolmb: num('poolmb', 8),  // size of each streaming buffer
+	pools: num('pools', 8),    // how many the ring rotates through
+	// collect readbacks in a burst every N frames. reading every frame drains the
+	// command buffer, and draining is exactly what SUPPRESSES this bug (~10x measured
+	// with the engine's synchronous probe) - so a detector that reads every frame can
+	// hide the thing it is looking for
+	collectevery: num('collectevery', 6),
+	// the engine's shape, which a plain webgl app does NOT have. bisection showed the
+	// final lighting composite is required to trigger the bug, so these model it:
+	blur: num('blur', 0),      // multi-tap blur A->B then SWAP the two textures, so the
+	                           // target rendered into next frame is the one sampled last
+	                           // frame - exactly DeferredRender::ApplyBlur
+	composite: num('composite', 0), // fullscreen pass through a real pixel shader that
+	                           // samples SEVERAL render-target textures at once, like the
+	                           // deferred light composite (every other pass in the engine
+	                           // uses the single-sampler ubershader)
+	matrices: num('matrices', 0),   // upload a 4x4 matrix uniform per draw (constant
+	                           // buffer churn - the engine sends 2-3 per draw)
+	// THE INGREDIENT. d3d11 has no 24-bit texture format, so RGB8 render targets are
+	// EMULATED by angle over RGBA8 with alpha-fixup work under every fbo operation. The
+	// engine uses RGB8 targets (to match d3d9's X8R8G8B8, whose alpha reads as 1) and
+	// drops draws constantly; forcing its targets to RGBA8 takes the rate to zero. This
+	// page was written with RGBA8 targets and never reproduced anything - &rgb8=1 is the
+	// switch that should make it start.
+	rgb8: num('rgb8', 0),
+};
+const logEl = document.getElementById('log'), statusEl = document.getElementById('status');
+const log = (m, cls) => { logEl.innerHTML += `<span class="${cls||''}">${m}</span>\n`; logEl.scrollTop = 1e9; console.log(m); };
+log('config ' + JSON.stringify(CFG));
+
+const gl = document.getElementById('view').getContext('webgl2',
+	{ alpha:false, depth:false, antialias:false, preserveDrawingBuffer:false });
+if (!gl) { log('no webgl2', 'bad'); throw new Error('no webgl2'); }
+
+function shader(type, src) {
+	const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+	if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) log(gl.getShaderInfoLog(s), 'bad');
+	return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, `#version 300 es
+layout(location=0) in vec2 aPos;
+uniform vec4 uRect;      // xy = offset, zw = scale
+uniform mat4 uMat;       // only used when &matrices=1 (constant buffer churn)
+out vec2 vUV;
+void main() {
+	vUV = aPos * 0.5 + 0.5;
+	vec4 p = vec4(aPos * uRect.zw + uRect.xy, 0.0, 1.0);
+	gl_Position = uMat * p;
+}`));
+gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform vec4 uColor;
+out vec4 oColor;
+void main() { oColor = texture(uTex, vUV) * uColor; }`));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) log(gl.getProgramInfoLog(prog), 'bad');
+gl.useProgram(prog);
+const L = {
+	rect: gl.getUniformLocation(prog, 'uRect'),
+	color: gl.getUniformLocation(prog, 'uColor'),
+	tex: gl.getUniformLocation(prog, 'uTex'),
+	mat: gl.getUniformLocation(prog, 'uMat'),
+};
+gl.uniform1i(L.tex, 0);
+
+// ---- second program: a real pixel shader sampling FOUR render targets at once, plus a
+// multi-tap blur. this is the engine's composite/blur shape; every other draw in both
+// the engine and this page goes through the single-sampler program above.
+const progC = gl.createProgram();
+gl.attachShader(progC, shader(gl.VERTEX_SHADER, `#version 300 es
+layout(location=0) in vec2 aPos;
+out vec2 vUV;
+void main() { vUV = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`));
+gl.attachShader(progC, shader(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uA, uB, uC, uD;
+uniform vec4 uParams;     // x = blur texel step, y = mode (0 composite, 1 blur), zw spare
+out vec4 oColor;
+void main() {
+	if (uParams.y > 0.5) {
+		// 9-tap blur of uA only
+		float s = uParams.x;
+		vec4 sum = vec4(0.0);
+		for (int y = -1; y <= 1; ++y)
+		for (int x = -1; x <= 1; ++x)
+			sum += texture(uA, vUV + vec2(float(x), float(y)) * s);
+		oColor = sum / 9.0;
+	} else {
+		// composite: sample four render targets and combine, like deferred lighting
+		vec4 a = texture(uA, vUV), b = texture(uB, vUV);
+		vec4 c = texture(uC, vUV), d = texture(uD, vUV);
+		oColor = vec4((a.rgb * b.rgb + c.rgb * 0.5 + d.rgb * 0.25), 1.0);
+	}
+}`));
+gl.linkProgram(progC);
+if (!gl.getProgramParameter(progC, gl.LINK_STATUS)) log(gl.getProgramInfoLog(progC), 'bad');
+const LC = {
+	a: gl.getUniformLocation(progC, 'uA'), b: gl.getUniformLocation(progC, 'uB'),
+	c: gl.getUniformLocation(progC, 'uC'), d: gl.getUniformLocation(progC, 'uD'),
+	params: gl.getUniformLocation(progC, 'uParams'),
+};
+gl.useProgram(progC);
+gl.uniform1i(LC.a, 0); gl.uniform1i(LC.b, 1); gl.uniform1i(LC.c, 2); gl.uniform1i(LC.d, 3);
+gl.useProgram(prog);
+const IDENTITY = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+// uMat multiplies every vertex, so it must be identity even when &matrices=0 - an unset
+// mat4 uniform is all zeros and would collapse the whole scene to a point
+gl.uniformMatrix4fv(L.mat, false, IDENTITY);
+
+// unit quad
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+function makeTex(w, h, pixels, filter, allowRGB8) {
+	const t = gl.createTexture();
+	gl.bindTexture(gl.TEXTURE_2D, t);
+	// source textures always carry alpha; only RENDER TARGETS take the rgb8 switch
+	if (allowRGB8 && CFG.rgb8)
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, w, h, 0, gl.RGB, gl.UNSIGNED_BYTE, pixels);
+	else
+		gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter || gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter || gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	return t;
+}
+// source textures: 8x8, each a distinct bright pattern
+const sources = [];
+for (let i = 0; i < CFG.tex; ++i) {
+	const px = new Uint8Array(8 * 8 * 4);
+	for (let p = 0; p < 64; ++p) {
+		px[p*4+0] = 60 + ((i * 37 + p * 3) % 196);
+		px[p*4+1] = 60 + ((i * 91 + p * 7) % 196);
+		px[p*4+2] = 60 + ((i * 53 + p * 11) % 196);
+		px[p*4+3] = 255;
+	}
+	sources.push(makeTex(8, 8, px));
+}
+const scratchTex = makeTex(1, 1, new Uint8Array([255,0,255,255]));
+
+// offscreen targets
+const targets = [];
+for (let i = 0; i < CFG.fbos; ++i) {
+	const t = makeTex(CFG.size, CFG.size, null, gl.LINEAR, true);
+	const f = gl.createFramebuffer();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+	if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) log('fbo incomplete', 'bad');
+	targets.push({ tex: t, fbo: f });
+}
+
+// extra targets for the blur swap and the composite (same size/format as the rest)
+function makeTarget() {
+	const t = makeTex(CFG.size, CFG.size, null, gl.LINEAR, true);
+	const f = gl.createFramebuffer();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+	return { tex: t, fbo: f };
+}
+let swapTarget = makeTarget();
+let compositeTarget = makeTarget();
+
+// reduction chain for detection: target -> 64 -> 16 -> 4 by linear halving blits,
+// then ONE 4x4 readback into a pbo ring, collected only after its fence signals
+const chain = [];
+for (let s = Math.min(64, CFG.size >> 1); s >= 4; s >>= 2) {
+	const t = makeTex(s, s, null, gl.LINEAR);
+	const f = gl.createFramebuffer();
+	gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+	gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+	chain.push({ size: s, fbo: f });
+}
+const GRID = 4, GRIDBYTES = GRID * GRID * 4;
+const ring = [];
+for (let i = 0; i < 6; ++i) {
+	const b = gl.createBuffer();
+	gl.bindBuffer(gl.PIXEL_PACK_BUFFER, b);
+	gl.bufferData(gl.PIXEL_PACK_BUFFER, GRIDBYTES, gl.STREAM_READ);
+	ring.push({ pbo: b, fence: null, frame: -1 });
+}
+gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+// ---- streaming pool, mirroring the engine: N large DYNAMIC buffers written with
+// bufferSubData at advancing offsets and drawn with a non-zero `first`
+const pool = { vaos: [], vbos: [], cur: 0, cursor: 0, stride: 8, bytes: CFG.poolmb * 1024 * 1024 };
+const streamVerts = new Float32Array(4 * 2);
+if (CFG.stream) {
+	for (let i = 0; i < CFG.pools; ++i) {
+		const v = gl.createVertexArray(), b = gl.createBuffer();
+		gl.bindVertexArray(v);
+		gl.bindBuffer(gl.ARRAY_BUFFER, b);
+		gl.bufferData(gl.ARRAY_BUFFER, pool.bytes, gl.DYNAMIC_DRAW);
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 2, gl.FLOAT, false, pool.stride, 0);
+		pool.vaos.push(v); pool.vbos.push(b);
+	}
+	gl.bindVertexArray(vao);
+	log(`streaming pool: ${CFG.pools} x ${CFG.poolmb}MB DYNAMIC_DRAW`);
+}
+function streamQuad(gx, gy, s) {
+	// a quad as a triangle strip, written fresh into the pool every draw
+	streamVerts[0] = gx - s; streamVerts[1] = gy - s;
+	streamVerts[2] = gx + s; streamVerts[3] = gy - s;
+	streamVerts[4] = gx - s; streamVerts[5] = gy + s;
+	streamVerts[6] = gx + s; streamVerts[7] = gy + s;
+	const need = streamVerts.byteLength;
+	if (pool.cursor + need > pool.bytes) { pool.cur = (pool.cur + 1) % CFG.pools; pool.cursor = 0; }
+	gl.bindVertexArray(pool.vaos[pool.cur]);
+	gl.bindBuffer(gl.ARRAY_BUFFER, pool.vbos[pool.cur]);
+	gl.bufferSubData(gl.ARRAY_BUFFER, pool.cursor, streamVerts);
+	const first = pool.cursor / pool.stride;
+	pool.cursor += need;
+	return first;
+}
+
+// blend churn: the engine's real blend transitions per frame, which bisection tied
+// to the drop rate more strongly than any other command category
+const BLEND_MODES = [
+	{ on:false },
+	{ on:true, src:'SRC_ALPHA', dst:'ONE_MINUS_SRC_ALPHA', eq:'FUNC_ADD' },
+	{ on:true, src:'ONE', dst:'ONE', eq:'FUNC_ADD' },
+	{ on:true, src:'DST_COLOR', dst:'ZERO', eq:'FUNC_ADD' },
+	{ on:true, src:'ONE', dst:'ONE_MINUS_SRC_ALPHA', eq:'MAX' },
+];
+function applyBlend(k) {
+	const m = BLEND_MODES[k % BLEND_MODES.length];
+	if (!m.on) { gl.disable(gl.BLEND); return; }
+	gl.enable(gl.BLEND);
+	gl.blendFunc(gl[m.src], gl[m.dst]);
+	gl.blendEquation(gl[m.eq]);
+}
+
+function bindTexture(t) {
+	if (CFG.pingpong) gl.bindTexture(gl.TEXTURE_2D, scratchTex);
+	gl.bindTexture(gl.TEXTURE_2D, t);
+}
+function bindFBO(f) {
+	if (CFG.fbopingpong) gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+	gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+}
+
+let frame = 0, events = 0, baseline = null, baselineFrames = 0, captures = 0;
+const cpu = new Uint8Array(GRIDBYTES);
+
+function detect() {
+	// collect any signaled capture (in a burst, see CFG.collectevery)
+	for (const slot of (frame % CFG.collectevery === 0 ? ring : [])) {
+		if (!slot.fence) continue;
+		const st = gl.clientWaitSync(slot.fence, 0, 0);
+		if (st !== gl.ALREADY_SIGNALED && st !== gl.CONDITION_SATISFIED) continue;
+		gl.deleteSync(slot.fence); slot.fence = null;
+		gl.bindBuffer(gl.PIXEL_PACK_BUFFER, slot.pbo);
+		gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, cpu);
+		gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+		if (!baseline) {
+			if (++baselineFrames > 30) { baseline = cpu.slice(); log('baseline locked at frame ' + slot.frame, 'good'); }
+		} else {
+			let worst = 0, at = -1;
+			for (let i = 0; i < GRIDBYTES; ++i) {
+				const d = Math.abs(cpu[i] - baseline[i]);
+				if (d > worst) { worst = d; at = i; }
+			}
+			// the scene never changes, so anything beyond sampling noise is a lost draw
+			if (worst > 12) {
+				++events;
+				log(`DROPEVENT frame=${slot.frame} maxDelta=${worst} texel=${at >> 2}`, 'bad');
+			}
+		}
+	}
+	// issue this frame's capture
+	const slot = ring[frame % ring.length];
+	if (slot.fence) return;
+	let src = targets[0].fbo, srcSize = CFG.size;
+	for (const c of chain) {
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, src);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, c.fbo);
+		gl.blitFramebuffer(0, 0, srcSize, srcSize, 0, 0, c.size, c.size, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+		src = c.fbo; srcSize = c.size;
+	}
+	gl.bindFramebuffer(gl.FRAMEBUFFER, chain[chain.length - 1].fbo);
+	gl.bindBuffer(gl.PIXEL_PACK_BUFFER, slot.pbo);
+	gl.readPixels(0, 0, GRID, GRID, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+	gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+	slot.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+	slot.frame = frame;
+	++captures;
+}
+
+function render() {
+	gl.bindVertexArray(vao);
+	gl.useProgram(prog);
+	gl.disable(gl.BLEND);
+
+	// offscreen passes: identical every frame
+	for (let i = 0; i < CFG.fbos; ++i) {
+		bindFBO(targets[i].fbo);
+		gl.viewport(0, 0, CFG.size, CFG.size);
+		gl.clearColor(0.05, 0.05, 0.08, 1);
+		gl.clear(gl.COLOR_BUFFER_BIT);
+		for (let d = 0; d < CFG.draws; ++d) {
+			const k = (i * CFG.draws + d);
+			gl.activeTexture(gl.TEXTURE0);
+			bindTexture(sources[k % sources.length]);
+			const col = 0.5 + 0.5 * Math.cos(k);
+			gl.uniform4f(L.color, col, 1 - col * 0.5, 0.6 + 0.4 * Math.sin(k), 1);
+			const gx = ((d % 6) - 2.5) / 3, gy = (Math.floor(d / 6) - 1.5) / 3;
+			if (CFG.blend) applyBlend(k);
+			if (CFG.matrices) gl.uniformMatrix4fv(L.mat, false, IDENTITY);
+			if (CFG.stream) {
+				// geometry comes from the streaming pool; the shader's uRect must not
+				// also transform it, so pass identity and bake position into the verts
+				gl.uniform4f(L.rect, 0, 0, 1, 1);
+				const first = streamQuad(gx, gy, 0.14);
+				gl.drawArrays(gl.TRIANGLE_STRIP, first, 4);
+				gl.bindVertexArray(vao);
+			} else {
+				gl.uniform4f(L.rect, gx, gy, 0.14, 0.14);
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			}
+		}
+		if (CFG.blend) gl.disable(gl.BLEND);
+	}
+
+	// blur pass with a texture SWAP, mirroring DeferredRender::ApplyBlur: render
+	// targets[0] into the swap target, then exchange them, so the texture rendered into
+	// next frame is exactly the one sampled this frame, alternating forever
+	if (CFG.blur && targets.length >= 2) {
+		gl.useProgram(progC);
+		bindFBO(swapTarget.fbo);
+		gl.viewport(0, 0, CFG.size, CFG.size);
+		gl.activeTexture(gl.TEXTURE0);
+		bindTexture(targets[0].tex);
+		gl.uniform4f(LC.params, 1 / CFG.size, 1, 0, 0);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		const t = targets[0]; targets[0] = swapTarget; swapTarget = t;
+		gl.useProgram(prog);
+	}
+
+	// composite: one fullscreen pass sampling FOUR render targets through the real
+	// pixel shader - the stage the engine bisection identified as the trigger
+	if (CFG.composite && targets.length >= 4) {
+		gl.useProgram(progC);
+		bindFBO(compositeTarget.fbo);
+		gl.viewport(0, 0, CFG.size, CFG.size);
+		for (let u = 0; u < 4; ++u) {
+			gl.activeTexture(gl.TEXTURE0 + u);
+			bindTexture(targets[u].tex);
+		}
+		gl.uniform4f(LC.params, 1 / CFG.size, 0, 0, 0);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		gl.activeTexture(gl.TEXTURE0);
+		gl.useProgram(prog);
+	}
+
+	// composite the targets to the canvas
+	bindFBO(null);
+	gl.viewport(0, 0, 512, 512);
+	gl.clearColor(0, 0, 0, 1);
+	gl.clear(gl.COLOR_BUFFER_BIT);
+	for (let i = 0; i < CFG.fbos; ++i) {
+		gl.activeTexture(gl.TEXTURE0);
+		bindTexture(targets[i].tex);
+		gl.uniform4f(L.color, 1, 1, 1, 1);
+		const x = (i % 2) * 0.5 - 0.25, y = Math.floor(i / 2) * 0.5 - 0.25;
+		gl.uniform4f(L.rect, x, y, 0.25, 0.25);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	}
+}
+
+let last = performance.now(), fps = 0;
+function loop() {
+	render();
+	if (!CFG.nodetect) detect();
+	if (CFG.finish) gl.finish();
+	++frame;
+	const now = performance.now();
+	fps = fps ? fps * 0.9 + 100 / (now - last) : 1000 / (now - last);
+	last = now;
+	if (frame % 60 === 0) {
+		statusEl.textContent =
+			`frame ${frame} | fps ${fps.toFixed(0)} | captures ${captures} | DROPEVENTS ${events}` +
+			(baseline ? '' : ' | locking baseline...');
+		if (frame % 600 === 0) log(`REPRO frames=${frame} events=${events} fps=${fps.toFixed(0)}`);
+	}
+	requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -1,0 +1,460 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL2 dropped-draw detector v4</title>
+<style>
+	body { background: #111; color: #ccc; font: 13px monospace; margin: 12px; }
+	canvas { background: #000; display: block; margin: 8px 0; image-rendering: pixelated; }
+	#fails { font-size: 40px; color: #4c4; font-weight: bold; }
+	#fails.bad { color: #f44; }
+	#log { white-space: pre; color: #f88; max-height: 240px; overflow-y: auto; }
+	label { margin-right: 14px; }
+	input[type=number] { width: 60px; }
+	button { font: inherit; }
+</style>
+</head>
+<body>
+<div>WebGL2 dropped-draw detector <b>v4</b> &mdash; every cell is its own verified draw call.
+v4 adds the game's EXACT vertex format (24-byte interleaved pos3/uv2/ubyte-color,
+GL_TRIANGLES), uploads sourced from a 256MB heap like wasm memory, and a css-scaled
+canvas. Uncheck things to bisect once it reproduces.</div>
+<div>
+	<label><input type="checkbox" id="useStream" checked> streamed pool</label>
+	<label><input type="checkbox" id="useOrphan" checked> orphaned bufferdata</label>
+	<label><input type="checkbox" id="useQuad" checked> static quad</label>
+	<label><input type="checkbox" id="useFBO" checked> render-to-texture</label>
+	<label><input type="checkbox" id="useTex" checked> texture binds</label>
+	<br>
+	<label><input type="checkbox" id="useBig" checked> big uploads</label>
+	<label><input type="checkbox" id="useMat" checked> matrix churn</label>
+	<label><input type="checkbox" id="useBlend" checked> blend toggling</label>
+	<label><input type="checkbox" id="useOver" checked> overdraw &times;24</label>
+	<label><input type="checkbox" id="useDense" checked> dense geometry (4k verts)</label>
+	<br>
+	<label><input type="checkbox" id="useNoise" checked> +400 offscreen draws</label>
+	<label>spread &micro;s/draw <input type="number" id="spreadUs" value="120" min="0" max="500"></label>
+	<label>verify every <input type="number" id="verifyN" value="1" min="1" max="60"> frames</label>
+	<button id="audioBtn">enable audio context</button>
+	<br>
+	<label><input type="checkbox" id="useGameLayout" checked> game vertex format (24B interleaved + ubyte color, GL_TRIANGLES)</label>
+	<label><input type="checkbox" id="useHeap" checked> uploads from 256MB heap</label>
+	<label><input type="checkbox" id="useWholeHeap" checked> <b>emscripten-style whole-heap upload</b></label>
+	<label><input type="checkbox" id="useScale" checked> css-scaled canvas</label>
+</div>
+<div id="fails">0 missed draws</div>
+<div id="stats"></div>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="log"></div>
+<script>
+'use strict';
+const COLS = 24, ROWS = 12;              // 288 verified draw calls per frame
+const W = 1280, H = 720;
+const PAD_BYTES = 128 * 1024;            // big-upload padding, like a terrain batch
+const DENSE_VERTS = 4096;                // dense-geometry strip length
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
+const failsEl = document.getElementById('fails');
+const statsEl = document.getElementById('stats');
+const logEl = document.getElementById('log');
+let totalFails = 0, frame = 0, verified = 0;
+
+// active audio context, like the game's openal/webaudio (needs a user gesture)
+document.getElementById('audioBtn').onclick = function () {
+	const ac = new AudioContext();
+	const osc = ac.createOscillator();
+	const gain = ac.createGain();
+	gain.gain.value = 0.0001;
+	osc.connect(gain).connect(ac.destination);
+	osc.start();
+	ac.resume();
+	this.textContent = 'audio context RUNNING';
+	this.disabled = true;
+};
+
+function compile(type, src) {
+	const s = gl.createShader(type);
+	gl.shaderSource(s, src);
+	gl.compileShader(s);
+	if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+	return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER,
+	'#version 300 es\nlayout(location=0) in vec2 p; uniform vec4 rect; uniform mat4 m1;' +
+	'uniform mat4 m2; out vec2 uv; void main(){ uv = p;' +
+	'vec2 q = rect.xy + p * rect.zw; gl_Position = m1 * m2 * vec4(q*2.0-1.0, 0.0, 1.0);}'));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER,
+	'#version 300 es\nprecision mediump float; in vec2 uv; uniform vec4 color;' +
+	'uniform sampler2D t; out vec4 o; void main(){ o = texture(t, uv) * color; }'));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+const rectLoc = gl.getUniformLocation(prog, 'rect');
+const colorLoc = gl.getUniformLocation(prog, 'color');
+const m1Loc = gl.getUniformLocation(prog, 'm1');
+const m2Loc = gl.getUniformLocation(prog, 'm2');
+const texLoc = gl.getUniformLocation(prog, 't');
+gl.uniform1i(texLoc, 0);
+const identity = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+gl.uniformMatrix4fv(m1Loc, false, identity);
+gl.uniformMatrix4fv(m2Loc, false, identity);
+
+// game-format program: 24-byte interleaved pos3/uv2/normalized-ubyte-color, like the
+// engine's WebTexVertex, drawn as GL_TRIANGLES lists
+const gProg = gl.createProgram();
+gl.attachShader(gProg, compile(gl.VERTEX_SHADER,
+	'#version 300 es\nlayout(location=0) in vec3 gp; layout(location=1) in vec2 guv;' +
+	'layout(location=2) in vec4 gcol; uniform mat4 m1; uniform mat4 m2;' +
+	'out vec2 uv; out vec4 vcol; void main(){ uv = guv; vcol = gcol;' +
+	'gl_Position = m1 * m2 * vec4(gp.xy*2.0-1.0, 0.0, 1.0); }'));
+gl.attachShader(gProg, compile(gl.FRAGMENT_SHADER,
+	'#version 300 es\nprecision mediump float; in vec2 uv; in vec4 vcol;' +
+	'uniform sampler2D t; out vec4 o; void main(){ o = texture(t, uv) * vcol; }'));
+gl.linkProgram(gProg);
+const gm1Loc = gl.getUniformLocation(gProg, 'm1');
+const gm2Loc = gl.getUniformLocation(gProg, 'm2');
+const gtexLoc = gl.getUniformLocation(gProg, 't');
+gl.useProgram(gProg);
+gl.uniform1i(gtexLoc, 0);
+gl.uniformMatrix4fv(gm1Loc, false, identity);
+gl.uniformMatrix4fv(gm2Loc, false, identity);
+gl.useProgram(prog);
+
+// 256MB backing store so uploads come from views into a huge buffer, like wasm HEAPU8
+const HEAP_BYTES = 256 << 20;
+const SCRATCH_OFF = 128 << 20;	// scratch region for building vertex data
+const bigHeap = new ArrayBuffer(HEAP_BYTES);
+const heapScratchF32 = new Float32Array(bigHeap, SCRATCH_OFF, 1 << 20);
+const heapScratchU8 = new Uint8Array(bigHeap, SCRATCH_OFF, 4 << 20);
+// the WHOLE heap as one view - this is what emscripten hands webgl2 on every upload
+const wholeHeapU8 = new Uint8Array(bigHeap);
+const smallScratchBuf = new ArrayBuffer(4 << 20);
+const smallScratchF32 = new Float32Array(smallScratchBuf, 0, 1 << 20);
+const smallScratchU8 = new Uint8Array(smallScratchBuf);
+
+// 32 distinct white textures so per-draw binds are real but verification-neutral
+const whiteTexs = [];
+for (let i = 0; i < 32; ++i) {
+	const t = gl.createTexture();
+	gl.bindTexture(gl.TEXTURE_2D, t);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 4, 4, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+		new Uint8Array(4 * 4 * 4).fill(255));
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	whiteTexs.push(t);
+}
+
+// technique 1: static unit-quad vbo, per-draw uniforms (the game's sprite path)
+const quadVAO = gl.createVertexArray();
+gl.bindVertexArray(quadVAO);
+const quadVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 1,1]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+
+// technique 2: append-only streamed pool (the game's terrain/font path)
+const POOL_BYTES = 16 << 20;
+const streamVAO = gl.createVertexArray();
+gl.bindVertexArray(streamVAO);
+const streamVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, streamVBO);
+gl.bufferData(gl.ARRAY_BUFFER, POOL_BYTES, gl.DYNAMIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+let streamCursor = 0;
+
+// technique 3: per-draw orphaned buffer (the game's original path)
+const orphanVAO = gl.createVertexArray();
+gl.bindVertexArray(orphanVAO);
+const orphanVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, orphanVBO);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+
+// game-format VAOs over the same stream/orphan buffers (24-byte stride)
+function makeGameVAO(vbo) {
+	const vao = gl.createVertexArray();
+	gl.bindVertexArray(vao);
+	gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+	gl.enableVertexAttribArray(0);
+	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+	gl.enableVertexAttribArray(1);
+	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 12);
+	gl.enableVertexAttribArray(2);
+	gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 24, 20);
+	return vao;
+}
+const gStreamVAO = makeGameVAO(streamVBO);
+const gOrphanVAO = makeGameVAO(orphanVBO);
+
+// render-to-texture target (the game's deferred passes)
+const rtTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, rtTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+const fbo = gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rtTex, 0);
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+// blit program to copy the rtt to the canvas
+const blitProg = gl.createProgram();
+gl.attachShader(blitProg, compile(gl.VERTEX_SHADER,
+	'#version 300 es\nlayout(location=0) in vec2 p; out vec2 uv; void main(){' +
+	'uv = p; gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);}'));
+gl.attachShader(blitProg, compile(gl.FRAGMENT_SHADER,
+	'#version 300 es\nprecision mediump float; in vec2 uv; uniform sampler2D t; out vec4 o;' +
+	'void main(){ o = texture(t, uv); }'));
+gl.linkProgram(blitProg);
+
+const cellW = 1 / COLS, cellH = 1 / ROWS;
+const framePixels = new Uint8Array(W * H * 4);	// one full readback per verify frame
+const quadVerts = new Float32Array(8);
+const padVerts = new Float32Array(PAD_BYTES / 4);	// zeros: degenerate padding
+const bigVerts = new Float32Array(PAD_BYTES / 4 + 8);
+const denseVerts = new Float32Array(DENSE_VERTS * 2);
+
+// expected color per cell varies per frame so a STALE cell is caught, not just a black one
+function cellColor(i, f) {
+	const r = (40 + (i * 7 + f) % 200) / 255;
+	const g = (40 + (i * 13 + f * 3) % 200) / 255;
+	const b = (40 + (i * 29 + f * 7) % 200) / 255;
+	return [r, g, b];
+}
+
+function spin(us) {
+	if (!us) return;
+	const until = performance.now() + us / 1000;
+	while (performance.now() < until) {}
+}
+
+function fillDense(cx, cy) {
+	// a long strip that repeats the same rect corners - same visual rect, 4k verts
+	for (let v = 0; v < DENSE_VERTS; ++v) {
+		const k = v & 3;
+		denseVerts[v*2]   = (k & 1) ? cx + cellW : cx;
+		denseVerts[v*2+1] = (k & 2) ? cy + cellH : cy;
+	}
+}
+
+// interleaved game-format fill: repeating quad triangle-list, same visual rect
+const triCorner = [0, 1, 2, 2, 1, 3];
+function fillGameVerts(f32, u8, cx, cy, col, vertCount) {
+	const r = col[0] * 255 | 0, g = col[1] * 255 | 0, b = col[2] * 255 | 0;
+	for (let v = 0; v < vertCount; ++v) {
+		const k = triCorner[v % 6];
+		const o = v * 6;
+		f32[o]   = (k & 1) ? cx + cellW : cx;
+		f32[o+1] = (k & 2) ? cy + cellH : cy;
+		f32[o+2] = 0;
+		f32[o+3] = (k & 1) ? 1 : 0;
+		f32[o+4] = (k & 2) ? 1 : 0;
+		const b8 = (o + 5) * 4;
+		u8[b8] = r; u8[b8+1] = g; u8[b8+2] = b; u8[b8+3] = 255;
+	}
+}
+
+let opts = {};
+function drawCell(i, technique) {
+	const cx = (i % COLS) * cellW, cy = ((i / COLS) | 0) * cellH;
+	const col = cellColor(i, frame);
+	gl.uniform4f(colorLoc, col[0], col[1], col[2], 1);
+	if (opts.tex)
+		gl.bindTexture(gl.TEXTURE_2D, whiteTexs[i % whiteTexs.length]);
+	if (opts.mat) {
+		gl.uniformMatrix4fv(m1Loc, false, identity);
+		gl.uniformMatrix4fv(m2Loc, false, identity);
+	}
+	if (opts.blend) {
+		gl.enable(gl.BLEND);
+		if (i & 1) gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		else gl.blendFunc(gl.ONE, gl.ZERO);
+	} else {
+		gl.disable(gl.BLEND);
+	}
+
+	if (technique !== 0 && opts.glayout) {
+		// the game's exact draw shape: interleaved 24-byte verts, ubyte colors,
+		// GL_TRIANGLES, program switch, upload from (optionally) huge-heap views
+		const f32 = opts.heap ? heapScratchF32 : smallScratchF32;
+		const u8 = opts.heap ? heapScratchU8 : smallScratchU8;
+		const vertCount = opts.dense ? 4092 : 6;
+		fillGameVerts(f32, u8, cx, cy, col, vertCount);
+		const bytes = vertCount * 24;
+		const upBytes = opts.big ? bytes + PAD_BYTES : bytes;
+		gl.useProgram(gProg);
+		if (opts.mat) {
+			gl.uniformMatrix4fv(gm1Loc, false, identity);
+			gl.uniformMatrix4fv(gm2Loc, false, identity);
+		}
+		if (technique === 1) {
+			streamCursor = Math.ceil(streamCursor / 24) * 24;
+			if (streamCursor + upBytes > POOL_BYTES) streamCursor = 0;
+			gl.bindVertexArray(gStreamVAO);
+			gl.bindBuffer(gl.ARRAY_BUFFER, streamVBO);
+			if (opts.whole && opts.heap) {
+				// exactly what emscripten does: whole-heap view + srcOffset + length
+				gl.bufferSubData(gl.ARRAY_BUFFER, streamCursor, wholeHeapU8, SCRATCH_OFF, upBytes);
+			} else {
+				gl.bufferSubData(gl.ARRAY_BUFFER, streamCursor, u8.subarray(0, upBytes));
+			}
+			gl.drawArrays(gl.TRIANGLES, streamCursor / 24, vertCount);
+			streamCursor += upBytes;
+		} else {
+			gl.bindVertexArray(gOrphanVAO);
+			gl.bindBuffer(gl.ARRAY_BUFFER, orphanVBO);
+			if (opts.whole && opts.heap) {
+				gl.bufferData(gl.ARRAY_BUFFER, wholeHeapU8, gl.STREAM_DRAW, SCRATCH_OFF, upBytes);
+			} else {
+				gl.bufferData(gl.ARRAY_BUFFER, u8.subarray(0, upBytes), gl.STREAM_DRAW);
+			}
+			gl.drawArrays(gl.TRIANGLES, 0, vertCount);
+		}
+		gl.useProgram(prog);
+	} else if (technique === 0) {
+		gl.uniform4f(rectLoc, cx, cy, cellW, cellH);
+		gl.bindVertexArray(quadVAO);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	} else if (technique === 1) {
+		gl.uniform4f(rectLoc, 0, 0, 1, 1);
+		gl.bindVertexArray(streamVAO);
+		gl.bindBuffer(gl.ARRAY_BUFFER, streamVBO);
+		let data;
+		if (opts.dense) { fillDense(cx, cy); data = denseVerts; }
+		else { quadVerts.set([cx,cy, cx+cellW,cy, cx,cy+cellH, cx+cellW,cy+cellH]); data = quadVerts; }
+		let bytes = data.byteLength;
+		if (opts.big) {
+			bigVerts.set(data.subarray(0, 8), 0);
+			bigVerts.set(padVerts, 8);
+			data = bigVerts;
+			bytes = data.byteLength;
+		}
+		if (streamCursor + bytes > POOL_BYTES) streamCursor = 0;
+		gl.bufferSubData(gl.ARRAY_BUFFER, streamCursor, data);
+		gl.drawArrays(gl.TRIANGLE_STRIP, streamCursor / 8, opts.big ? 4 : data.length / 2);
+		streamCursor += bytes;
+	} else {
+		gl.uniform4f(rectLoc, 0, 0, 1, 1);
+		gl.bindVertexArray(orphanVAO);
+		gl.bindBuffer(gl.ARRAY_BUFFER, orphanVBO);
+		let data;
+		if (opts.dense) { fillDense(cx, cy); data = denseVerts; }
+		else { quadVerts.set([cx,cy, cx+cellW,cy, cx,cy+cellH, cx+cellW,cy+cellH]); data = quadVerts; }
+		gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, data.length / 2);
+	}
+
+	if (opts.over) {
+		// pixel load: 24 invisible full-cell blended quads (alpha 0 = no visual change)
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		gl.uniform4f(rectLoc, cx, cy, cellW, cellH);
+		gl.uniform4f(colorLoc, 1, 1, 1, 0);
+		gl.bindVertexArray(quadVAO);
+		for (let k = 0; k < 24; ++k)
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	}
+}
+
+function log(msg) {
+	logEl.textContent = (msg + '\n' + logEl.textContent).split('\n').slice(0, 40).join('\n');
+}
+
+let lastStats = performance.now(), framesSince = 0;
+function tick() {
+	opts = {
+		tex: document.getElementById('useTex').checked,
+		big: document.getElementById('useBig').checked,
+		mat: document.getElementById('useMat').checked,
+		blend: document.getElementById('useBlend').checked,
+		over: document.getElementById('useOver').checked,
+		dense: document.getElementById('useDense').checked,
+		glayout: document.getElementById('useGameLayout').checked,
+		heap: document.getElementById('useHeap').checked,
+		whole: document.getElementById('useWholeHeap').checked,
+	};
+	canvas.style.width = document.getElementById('useScale').checked ? 'min(1280px, 96vw)' : '';
+	const spreadUs = +document.getElementById('spreadUs').value || 0;
+	const verifyN = Math.max(1, +document.getElementById('verifyN').value || 1);
+	const useFBO = document.getElementById('useFBO').checked;
+	const useNoise = document.getElementById('useNoise').checked;
+	const techniques = [];
+	if (document.getElementById('useQuad').checked) techniques.push(0);
+	if (document.getElementById('useStream').checked) techniques.push(1);
+	if (document.getElementById('useOrphan').checked) techniques.push(2);
+	if (!techniques.length) techniques.push(0);
+
+	gl.useProgram(prog);
+	gl.viewport(0, 0, W, H);
+	gl.bindFramebuffer(gl.FRAMEBUFFER, useFBO ? fbo : null);
+	gl.clearColor(0, 0, 0, 1);
+	gl.clear(gl.COLOR_BUFFER_BIT);
+
+	if (useNoise) {
+		// extra command volume: 400 tiny draws offscreen (rect outside 0..1)
+		gl.disable(gl.BLEND);
+		gl.bindVertexArray(quadVAO);
+		gl.uniform4f(colorLoc, 1, 1, 1, 1);
+		for (let k = 0; k < 400; ++k) {
+			gl.uniform4f(rectLoc, 2 + (k % 7) * 0.01, 2, 0.005, 0.005);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		}
+	}
+
+	const cells = COLS * ROWS;
+	for (let i = 0; i < cells; ++i) {
+		drawCell(i, techniques[i % techniques.length]);
+		spin(spreadUs);	// cpu work between draws, like the game's wasm frame
+	}
+
+	if (useFBO) {
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.disable(gl.BLEND);
+		gl.useProgram(blitProg);
+		gl.bindVertexArray(quadVAO);
+		gl.bindTexture(gl.TEXTURE_2D, rtTex);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		gl.useProgram(prog);
+	}
+
+	if (frame % verifyN === 0) {
+		// verify: one full-frame readback, then check every cell's center pixel
+		gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, framePixels);
+		for (let i = 0; i < cells; ++i) {
+			const px = ((i % COLS) + 0.5) * (W / COLS) | 0;
+			const py = (((i / COLS) | 0) + 0.5) * (H / ROWS) | 0;
+			const o = (py * W + px) * 4;
+			const col = cellColor(i, frame);
+			const dr = Math.abs(framePixels[o] - col[0] * 255);
+			const dg = Math.abs(framePixels[o+1] - col[1] * 255);
+			const db = Math.abs(framePixels[o+2] - col[2] * 255);
+			if (dr > 6 || dg > 6 || db > 6) {
+				++totalFails;
+				const tech = ['quad', 'stream', 'orphan'][techniques[i % techniques.length]];
+				log('frame ' + frame + ': cell ' + i + ' (' + tech + ') expected rgb(' +
+					(col[0]*255|0) + ',' + (col[1]*255|0) + ',' + (col[2]*255|0) + ') got rgb(' +
+					framePixels[o] + ',' + framePixels[o+1] + ',' + framePixels[o+2] + ')');
+			}
+			++verified;
+		}
+		failsEl.textContent = totalFails + ' missed draws';
+		failsEl.className = totalFails ? 'bad' : '';
+	}
+
+	++frame;
+	++framesSince;
+	const now = performance.now();
+	if (now - lastStats > 1000) {
+		statsEl.textContent = 'frame ' + frame + ' | ' + framesSince + ' fps | ' +
+			verified.toLocaleString() + ' cells verified | ' + (COLS * ROWS) + ' draws/frame';
+		framesSince = 0;
+		lastStats = now;
+	}
+	requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
