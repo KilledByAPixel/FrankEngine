@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Frank Engine - TestGame (web)</title>
+<style>
+	body { background: #111; color: #999; font: 13px monospace; margin: 0;
+	       display: flex; flex-direction: column; min-height: 100vh;
+	       align-items: center; justify-content: center; }
+	/* uniform scale, no letterbox inside the element - keeps mouse mapping linear */
+	canvas { width: min(1280px, 96vw); aspect-ratio: 16 / 9; height: auto;
+	         background: #000; display: block; }
+	p { margin: 10px 0 0 0; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1280" height="720" tabindex="0"></canvas>
+<p>Frank Engine TestGame &middot; compiled to WebAssembly &middot; F1 info &middot; F2 physics debug &middot; browser console (F12) shows the engine log</p>
+<script>
+var Module = {
+	canvas: document.getElementById('canvas'),
+	// the game parses WAV/OGG bytes itself; browser-side audio decode is unused AND
+	// hangs Firefox forever (a preload run-dependency that never resolves)
+	noAudioDecoding: true,
+	// the .data package resolves against the page by default; keep everything in build/
+	locateFile: function (path, scriptDirectory) { return (scriptDirectory || 'build/') + path; }
+};
+</script>
+<script src="build/testGame.js"></script>
+</body>
+</html>
