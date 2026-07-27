@@ -900,13 +900,28 @@ bool FrankWebRenderIsActive() { return webGLContext != 0; }
 // it was cleared to and behaves like a d3d surface with no alpha channel at all. Called
 // on every render target change; the canvas itself is created with alpha:false, so it
 // needs no pinning.
+// A/B for the residual dropped-draw flicker. The ORIGINAL bug was angle emulating
+// GL_RGB8 over rgba8, which forces a PARTIAL RenderTargetWriteMask (0x7, not 0xF) on
+// every draw into such a target - and draws with a partial mask were the ones getting
+// dropped. Switching to real rgba8 storage removed the emulation and measured 704
+// events -> 0... but this alpha pin is itself a glColorMask with alpha off, which is
+// ALSO a partial write mask. So the trigger may only be half removed.
+// OFF by default now. Faking "no alpha channel" was only ever needed if something read
+// the alpha of these targets, and after auditing the deferred pipeline nothing does:
+// the final overlay composites with SRCCOLOR (colour, not alpha), lights accumulate
+// additively, the light shaders' output alpha is never sampled, and the emissive bloom
+// was changed to scale through the vertex colour instead of source alpha. So the pin
+// bought nothing and cost the exact condition that drops draws.
+// 1 restores the mask, for A/B if a blending difference ever shows up.
+ConsoleCommandSimple(bool, webAlphaPin, false);
+
 static bool webAlphaMaskClosed = false;
 static bool webPresentAlphaPinned = false;	// set when the present target is RGBA8
 static void WebApplyAlphaPin(const FrankWebTexture* target)
 {
 	// a NULL target means the default framebuffer, which is really the offscreen present
 	// target when that is in use - it needs the same pin, for the same reason
-	const bool wantClosed = target ? target->alphaPinned : webPresentAlphaPinned;
+	const bool wantClosed = webAlphaPin && (target ? target->alphaPinned : webPresentAlphaPinned);
 	if (wantClosed == webAlphaMaskClosed)
 		return;
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, wantClosed ? GL_FALSE : GL_TRUE);
@@ -1188,15 +1203,65 @@ void FrankWebSetUniformMatrix(unsigned int glProgram, const char* name, const fl
 // Offscreen present. Instead of drawing the scene straight into the canvas (which on
 // chrome/angle-d3d11 is a dxgi swap-chain surface owned by the compositor), draw into an
 // ordinary full-screen render target and blit it to the canvas once per frame.
-// Measured on the command-stream replay: ~2.4x fewer dropped draws, and it stacks with
-// webFlushEveryDraws (~2x) for ~6x combined. Pixel output is identical.
-// OFF by default now. This was a MITIGATION found while hunting the chrome/angle
-// dropped-draw flicker (it measured ~2.4x fewer drops at the time), not the fix. The
-// actual cause turned out to be angle emulating GL_RGB8 render targets over rgba8 with a
-// permanently masked alpha plane, which WebUseRGB8Targets settles by using real rgba8.
-// With that fixed this only buys an extra full-screen blit every frame, on every
-// platform - so it is pure cost for browsers that never had the bug.
-ConsoleCommandSimple(bool, webOffscreenPresent, false);
+// Pixel output is identical.
+//
+// ON, and treat it as the FIX rather than a mitigation. Tested directly: with everything
+// else off the flicker reproduces immediately, and turning this one switch on stops it -
+// on its own, without webShadowRender2. Two hypotheses died to get here. It is not the
+// emulated GL_RGB8 targets on their own (real rgba8 helped a lot but left a residual),
+// and it is not the partial write mask from the alpha pin (webAlphaPin 0 and 1 both
+// still flicker).
+//
+// What is left is the DEFAULT FRAMEBUFFER itself. Every draw that lands on the canvas is
+// landing on a swap-chain surface the compositor co-owns, and those are the draws that go
+// missing. That fits the symptoms better than anything before it: what disappears is the
+// light overlay composite - the multiply that darkens the scene - which is exactly the
+// draw that targets the canvas. "The whole light channel is gone" is that one draw being
+// dropped, not a shadow map half-rendered.
+//
+// Cost is one full-screen blit per frame - and on a TILE-BASED gpu that is a whole extra
+// render pass, which apple's own guidance and the safari research both call out as
+// expensive. The bug is specific to angle's D3D11 backend (a dxgi swap chain), and no
+// apple device has one, so this is skipped there: see WebUseOffscreenPresent.
+// That is a deliberate bet on hardware we cannot test here, made because the alternative
+// is shipping a known extra full-screen pass to every mac and ipad player. It is one
+// switch (webOffscreenPresent 1 forces it back on) and the first thing to try if an
+// apple tester reports flicker.
+ConsoleCommandSimple(bool, webOffscreenPresent, true);
+
+// Apple gpus (every ipad, every apple silicon mac, through safari or chrome) are
+// TILE-BASED. Two things key off this: mid-frame flushes (which force the tiler to
+// resolve early, splitting one tile pass into several) and the offscreen present above.
+static bool WebGpuIsTileBased()
+{
+	static int isTiled = -1;
+	if (isTiled < 0)
+	{
+		// NOT glGetString(GL_RENDERER): browsers mask that for fingerprinting (it comes
+		// back as "WebKit WebGL"), and the real string needs WEBGL_debug_renderer_info,
+		// which is itself being restricted. The platform is what we actually care about
+		// anyway - every current apple device is tile-based.
+		isTiled = EM_ASM_INT({
+			var n = navigator;
+			if (/iPad|iPhone|iPod/.test(n.platform || "")) return 1;
+			// ipadOS 13+ reports itself as a mac; touch points give it away
+			if (/Mac/.test(n.platform || "") && (n.maxTouchPoints || 0) > 1) return 1;
+			if (/Mac/.test(n.platform || "")) return 1;	// apple silicon; intel macs cost nothing here
+			return 0;
+		});
+		printf("webRender: %s gpu - offscreen present %s, mid-frame flushes %s\n",
+			isTiled ? "apple/tile-based" : "immediate-mode",
+			isTiled ? "OFF" : "on", isTiled ? "OFF" : "on");
+	}
+	return isTiled > 0;
+}
+
+// the dropped-draw bug lives in angle's d3d11 swap chain, which apple devices do not
+// have - so they skip the blit and render straight to the canvas
+static bool WebUseOffscreenPresent()
+{
+	return webOffscreenPresent && !WebGpuIsTileBased();
+}
 static GLuint webPresentFBO = 0, webPresentTex = 0;
 static int webPresentW = 0, webPresentH = 0;
 
@@ -1204,7 +1269,7 @@ static int webPresentW = 0, webPresentH = 0;
 // offscreen present target. everything that used to bind 0 binds this instead.
 static GLuint WebDefaultFBO()
 {
-	if (!webOffscreenPresent)
+	if (!WebUseOffscreenPresent())
 		return 0;
 	if (webPresentFBO && (webPresentW != g_backBufferWidth || webPresentH != g_backBufferHeight))
 	{
@@ -1319,7 +1384,7 @@ void FrankWebRenderEnd()
 	// gated on the SETTING too: toggling it off mid-run must stop presenting, or the
 	// stale target gets blitted over a frame that was already drawn to the canvas and
 	// the picture appears frozen
-	if (webOffscreenPresent && webPresentFBO)
+	if (WebUseOffscreenPresent() && webPresentFBO)
 	{
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, webPresentFBO);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1417,35 +1482,6 @@ static void WebResetBlendCache()
 // theory about hardware we cannot measure, against a measurement we can, so it stays
 // until the apple-side research says otherwise. See local/mac-ios-webgl-perf-brief.md.
 ConsoleCommandSimple(int, webFlushEveryDraws, 25);
-
-// Apple gpus (every ipad, every apple silicon mac, through safari or chrome) are
-// TILE-BASED: a mid-frame flush forces the tiler to resolve what it has accumulated,
-// which can split one tile pass into several. That is a much worse deal than on an
-// immediate-mode desktop gpu, where measuring here showed the flush was mildly
-// POSITIVE - so the flush stays on everywhere except the hardware the theory says it
-// hurts, rather than being removed globally on theory alone. Unverified on real apple
-// hardware; see local/mac-ios-webgl-perf-brief.md.
-static bool WebGpuIsTileBased()
-{
-	static int isTiled = -1;
-	if (isTiled < 0)
-	{
-		// NOT glGetString(GL_RENDERER): browsers mask that for fingerprinting (it comes
-		// back as "WebKit WebGL"), and the real string needs WEBGL_debug_renderer_info,
-		// which is itself being restricted. The platform is what we actually care about
-		// anyway - every current apple device is tile-based.
-		isTiled = EM_ASM_INT({
-			var n = navigator;
-			if (/iPad|iPhone|iPod/.test(n.platform || "")) return 1;
-			// ipadOS 13+ reports itself as a mac; touch points give it away
-			if (/Mac/.test(n.platform || "") && (n.maxTouchPoints || 0) > 1) return 1;
-			if (/Mac/.test(n.platform || "")) return 1;	// apple silicon; intel macs cost nothing here
-			return 0;
-		});
-		printf("webRender: %s\n", isTiled ? "apple/tile-based gpu - skipping mid-frame flushes" : "immediate-mode gpu");
-	}
-	return isTiled > 0;
-}
 
 static void WebCountDrawForFlush()
 {

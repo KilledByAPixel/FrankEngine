@@ -951,6 +951,12 @@ void DeferredRender::InitDeviceObjects()
 		// round to nearest multiple of 4
 		finalTextureSize.x = 4.0f * (int)(finalTextureSize.x / 4);
 		finalTextureSize.y = 4.0f * (int)(finalTextureSize.y / 4);
+
+		// the light overlay, normal map and specular map are all created at this size, so
+		// this one line says whether finalTextureScale actually took effect
+		printf("DeferredRender: light targets %dx%d (backbuffer %dx%d, finalTextureScale %.3f)\n",
+			(int)finalTextureSize.x, (int)finalTextureSize.y,
+			g_backBufferWidth, g_backBufferHeight, finalTextureSizeScale);
 	}
 	
 	if (!CreateTexture(finalTextureSize, textureFinal))
@@ -1315,8 +1321,14 @@ void DeferredRender::GlobalRender()
 	if (emissiveLightEnable && showTexture == 0 && emissiveBloomAlpha > 0)
 	{
 		// emissive bloom pass
-		// use square aspect ratio
-		pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		// Scale the bloom through the vertex COLOUR and blend with ONE, rather than
+		// through source ALPHA. Identical result - the emissive target is X8R8G8B8, so
+		// its alpha reads as 1 and the old form came out as tex.rgb * emissiveBloomAlpha
+		// either way - but it means nothing in the deferred pipeline reads the alpha
+		// channel of these targets any more. That matters on gl, where "no alpha
+		// channel" has to be faked, and faking it with a write mask is what was dropping
+		// draws (see WebApplyAlphaPin).
+		pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
 		pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
 		pd3dDevice->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD );
 		const float oldAspect = camera.GetAspectRatio();
@@ -1328,7 +1340,7 @@ void DeferredRender::GlobalRender()
 		camera.SetAspectRatio(oldAspect);
 		camera.SetLockedAspectRatio(oldLockedAspect);
 		g_cameraBase->PrepareForRender();
-		g_render->RenderQuad(XForm2(halfPixelOffset) * xf.position, cameraSize, Color::White(emissiveBloomAlpha), textureEmissive);
+		g_render->RenderQuad(XForm2(halfPixelOffset) * xf.position, cameraSize, Color(emissiveBloomAlpha, emissiveBloomAlpha, emissiveBloomAlpha, 1.0f), textureEmissive);
 	}
 
 	if (visionEnable && showTexture == 0 && !g_gameControlBase->IsEditPreviewMode())
