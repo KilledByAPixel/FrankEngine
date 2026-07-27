@@ -341,17 +341,59 @@ HRESULT FrankWebSoundSource::SetAllParameters(const DS3DBUFFER* p, DWORD flags)
 	return S_OK;
 }
 
+// SoundControl::Update pushes the listener every frame, and in emscripten's OpenAL EVERY
+// alListener* setter walks the whole source list and rebuilds each one's panner. Sending
+// three of them per frame made this the single most expensive thing in the game - 24% of
+// all cpu time, and worse in safari, where panner updates cost more. So only send a
+// value that actually moved. Orientation is constant in a 2d game and velocity is zero
+// unless doppler is in use, which means two of the three usually stop happening at all.
+static bool WebListenerChanged(float* cache, const float* want, int count)
+{
+	for (int i = 0; i < count; ++i)
+	{
+		// plain inequality: these come from the camera transform and are already
+		// quantized by the fixed timestep, so there is no jitter to filter out
+		if (cache[i] != want[i])
+		{
+			for (int j = 0; j < count; ++j)
+				cache[j] = want[j];
+			return true;
+		}
+	}
+	return false;
+}
+
 HRESULT IDirectSound3DListener::SetAllParameters(const DS3DLISTENER* p, DWORD flags)
 {
 	if (!webALActive || !p)
 		return E_FAIL;
 
-	alListener3f(AL_POSITION, p->vPosition.x, p->vPosition.y, p->vPosition.z);
-	alListener3f(AL_VELOCITY, p->vVelocity.x, p->vVelocity.y, p->vVelocity.z);
+	// NaN would never compare equal and would resend forever, so seed as "unset"
+	static float cachedPos[3] = { 1e30f, 1e30f, 1e30f };
+	static float cachedVel[3] = { 1e30f, 1e30f, 1e30f };
+	static float cachedOri[6] = { 1e30f, 1e30f, 1e30f, 1e30f, 1e30f, 1e30f };
+	static float cachedDoppler = 1e30f;
+
+	const float pos[3] = { p->vPosition.x, p->vPosition.y, p->vPosition.z };
+	if (WebListenerChanged(cachedPos, pos, 3))
+		alListener3f(AL_POSITION, pos[0], pos[1], pos[2]);
+
+	const float vel[3] = { p->vVelocity.x, p->vVelocity.y, p->vVelocity.z };
+	if (WebListenerChanged(cachedVel, vel, 3))
+		alListener3f(AL_VELOCITY, vel[0], vel[1], vel[2]);
+
 	// DS is left handed (+z into screen), AL right handed: face -z, up from the camera
 	const float orientation[6] = { 0, 0, -1, p->vOrientTop.x, p->vOrientTop.y, p->vOrientTop.z };
-	alListenerfv(AL_ORIENTATION, orientation);
-	alDopplerFactor(p->flDopplerFactor >= 0 ? p->flDopplerFactor : 1.0f);
+	if (WebListenerChanged(cachedOri, orientation, 6))
+		alListenerfv(AL_ORIENTATION, orientation);
+
+	const float doppler = p->flDopplerFactor >= 0 ? p->flDopplerFactor : 1.0f;
+	if (doppler != cachedDoppler)
+	{
+		cachedDoppler = doppler;
+		alDopplerFactor(doppler);
+	}
+
 	webListenerRolloff = p->flRolloffFactor;
 	return S_OK;
 }

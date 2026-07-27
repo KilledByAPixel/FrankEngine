@@ -1190,7 +1190,13 @@ void FrankWebSetUniformMatrix(unsigned int glProgram, const char* name, const fl
 // ordinary full-screen render target and blit it to the canvas once per frame.
 // Measured on the command-stream replay: ~2.4x fewer dropped draws, and it stacks with
 // webFlushEveryDraws (~2x) for ~6x combined. Pixel output is identical.
-ConsoleCommandSimple(bool, webOffscreenPresent, true);
+// OFF by default now. This was a MITIGATION found while hunting the chrome/angle
+// dropped-draw flicker (it measured ~2.4x fewer drops at the time), not the fix. The
+// actual cause turned out to be angle emulating GL_RGB8 render targets over rgba8 with a
+// permanently masked alpha plane, which WebUseRGB8Targets settles by using real rgba8.
+// With that fixed this only buys an extra full-screen blit every frame, on every
+// platform - so it is pure cost for browsers that never had the bug.
+ConsoleCommandSimple(bool, webOffscreenPresent, false);
 static GLuint webPresentFBO = 0, webPresentTex = 0;
 static int webPresentW = 0, webPresentH = 0;
 
@@ -1556,7 +1562,12 @@ struct WebTexVertex { float x, y, z; float u, v; unsigned char r, g, b, a; };
 // trips it dumps everything to the browser console (FLICKERPROBE lines).
 ////////////////////////////////////////////////////////////////////////////////////////
 
-ConsoleCommandSimple(bool, webShadowProbe, true);
+// OFF by default: this is diagnostics for a bug that is fixed (angle emulating GL_RGB8
+// render targets over rgba8 - see WebUseRGB8Targets). It costs several SYNCHRONOUS
+// glReadPixels per frame, which drain the gpu pipeline and dominated everything else -
+// 54% of all cpu time in a profile of the shipped build. Turn it on from the console
+// only while chasing a dropped-draw regression.
+ConsoleCommandSimple(bool, webShadowProbe, false);
 
 // workaround experiment for the nvidia/chrome dropped-draw flicker - forces command
 // submission boundaries so a contending chrome instance can't preempt mid-batch.
@@ -1566,7 +1577,10 @@ ConsoleCommandSimple(bool, webShadowProbe, true);
 // during the shadow pass, 4=glFlush after EVERY streamed draw in every pass (slowest,
 // maximally granular - the f8 view showed the emissive map glitching too, so per-pass
 // flushes only protected one of several victims)
-ConsoleCommandSimple(int, webShadowFlush, 1);
+// 0 (off) by default now - another mitigation from the flicker hunt rather than the fix
+// (see webOffscreenPresent). A glFlush every frame forces a submission boundary, which
+// costs on every backend and can stop metal batching work on safari.
+ConsoleCommandSimple(int, webShadowFlush, 0);
 
 // auto-download pngs of the glitched shadow map on capture (off: console lines only)
 ConsoleCommandSimple(bool, webShadowCapture, false);
