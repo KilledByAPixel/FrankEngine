@@ -906,14 +906,20 @@ bool FrankWebRenderIsActive() { return webGLContext != 0; }
 // dropped. Switching to real rgba8 storage removed the emulation and measured 704
 // events -> 0... but this alpha pin is itself a glColorMask with alpha off, which is
 // ALSO a partial write mask. So the trigger may only be half removed.
-// OFF by default now. Faking "no alpha channel" was only ever needed if something read
-// the alpha of these targets, and after auditing the deferred pipeline nothing does:
-// the final overlay composites with SRCCOLOR (colour, not alpha), lights accumulate
-// additively, the light shaders' output alpha is never sampled, and the emissive bloom
-// was changed to scale through the vertex colour instead of source alpha. So the pin
-// bought nothing and cost the exact condition that drops draws.
-// 1 restores the mask, for A/B if a blending difference ever shows up.
-ConsoleCommandSimple(bool, webAlphaPin, false);
+// ON, and it has to be. An earlier pass turned this off after "auditing" the pipeline
+// for alpha use and concluding nothing read it. That audit asked the wrong question: it
+// looked for blending on DESTINATION alpha (there is none) and missed that the blur and
+// downsample chain SAMPLES these targets, so the sampled alpha becomes the SOURCE alpha
+// of the next blend. Pinned, that is always 1; unpinned it is whatever the last draw
+// left, and the compositing blows out - TestGame's sky panels went from dark navy to
+// near-white, which is what caught it.
+//
+// It is also not the flicker trigger, which was the other reason to remove it: tested
+// directly, the dropped-draw bug reproduces with this both on and off. The fix for that
+// is webOffscreenPresent.
+//
+// 0 is kept for A/B only. It is not a shipping configuration.
+ConsoleCommandSimple(bool, webAlphaPin, true);
 
 static bool webAlphaMaskClosed = false;
 static bool webPresentAlphaPinned = false;	// set when the present target is RGBA8
