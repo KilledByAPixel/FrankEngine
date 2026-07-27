@@ -860,6 +860,10 @@ public:
 	static bool IsCoveringScreen() { return GetMode() != Windowed; }
 	static int GetRefreshRate();	// measured from rAF cadence (webGui.cpp) - feeds delta smoothing
 	static Mode GetFullscreenMode() { return Borderless; }
+	// false where the browser has no fullscreen api for elements - ios safari on
+	// iphone, and ipad depending on version. games should hide their fullscreen
+	// button when this is false rather than offer a control that cannot work
+	static bool IsFullscreenAvailable();
 	static const WCHAR* GetModeName() { return GetModeName(GetMode()); }
 	// the browser has no borderless mode - its fullscreen IS full screen, so the web
 	// build only ever shows these two (windowMode.cpp also names "Borderless Mode")

@@ -57,6 +57,10 @@ public:
 	// for it, borderless otherwise. fixed at startup, so the toggle is stable
 	static WindowDisplayMode GetFullscreenMode();
 
+	// always true on windows; the web build can run where the browser has no
+	// fullscreen api at all (ios), so gui code should check before showing a toggle
+	static bool IsFullscreenAvailable() { return true; }
+
 	// display name for a mode, for gui buttons
 	static const WCHAR* GetModeName() { return GetModeName(mode); }
 	static const WCHAR* GetModeName(WindowDisplayMode queryMode);

@@ -577,6 +577,27 @@ bool FrankWebRenderCreateContext()
 	}
 	emscripten_webgl_make_context_current(webGLContext);
 
+	// A lost context is otherwise SILENT and permanent: every later gl call becomes a
+	// no-op, the picture stops updating, and the game looks frozen with nothing in the
+	// log. Browsers also only allow a context to be restored if the default action of
+	// webglcontextlost is prevented - without this listener recovery is impossible even
+	// in principle. Mobile safari can drop the context on a canvas resize, which is what
+	// a fullscreen toggle does, so this is the likeliest way an ipad "freezes".
+	EM_ASM({
+		var c = document.getElementById("canvas");
+		if (!c || c.__frankContextHooks) return;
+		c.__frankContextHooks = 1;
+		c.addEventListener("webglcontextlost", function(e) {
+			e.preventDefault();		// required, or the context can never come back
+			console.error("webRender: WEBGL CONTEXT LOST - rendering has stopped");
+			if (typeof Module !== "undefined") Module.frankContextLost = 1;
+		}, false);
+		c.addEventListener("webglcontextrestored", function() {
+			console.warn("webRender: webgl context restored by the browser");
+			if (typeof Module !== "undefined") Module.frankContextRestored = 1;
+		}, false);
+	});
+
 	webProgram = WebCompileProgram(webVS, webFS, "uber", webLocs);
 	webBlurProgram = WebCompileProgram(webVS, webBlurFS, "blur", webBlurLocs);
 

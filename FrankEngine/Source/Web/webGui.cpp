@@ -346,9 +346,37 @@ WindowControl::Mode WindowControl::GetMode()
 	return Windowed;
 }
 
+// ios safari has no fullscreen api for ordinary elements (only <video> can go
+// fullscreen), so requesting it there does nothing useful and, on ipad, asking anyway
+// was reported to leave the game stuck. Ask the browser instead of guessing by user
+// agent, and cache it - the answer cannot change during a run.
+bool WindowControl::IsFullscreenAvailable()
+{
+	static int available = -1;
+	if (available < 0)
+	{
+		if (!WebHasDocument())
+			available = 0;
+		else
+		{
+			available = EM_ASM_INT({
+				if (!document.fullscreenEnabled && !document.webkitFullscreenEnabled)
+					return 0;
+				var c = document.getElementById("canvas");
+				if (!c)
+					return 0;
+				return (c.requestFullscreen || c.webkitRequestFullscreen) ? 1 : 0;
+			});
+			if (!available)
+				printf("webGui: browser has no element fullscreen api - toggle disabled\n");
+		}
+	}
+	return available != 0;
+}
+
 void WindowControl::CycleMode()
 {
-	if (!WebHasDocument())
+	if (!WebHasDocument() || !IsFullscreenAvailable())
 		return;
 	if (GetMode() != Windowed)
 	{
@@ -363,7 +391,10 @@ void WindowControl::CycleMode()
 	strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_SCALE_ASPECT;
 	strategy.canvasResolutionScaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_NONE;
 	strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
-	emscripten_request_fullscreen_strategy("#canvas", EM_TRUE, &strategy);
+	// the result was previously discarded, so a refused request looked like success
+	const EMSCRIPTEN_RESULT result = emscripten_request_fullscreen_strategy("#canvas", EM_TRUE, &strategy);
+	if (result != EMSCRIPTEN_RESULT_SUCCESS && result != EMSCRIPTEN_RESULT_DEFERRED)
+		printf("webGui: fullscreen request refused (%d) - staying windowed\n", (int)result);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
