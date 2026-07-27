@@ -8,9 +8,24 @@
 #include "frankEngine.h"
 #include "../sound/musicControl.h"
 
-#include <dsound.h>
+#ifndef FRANK_PLATFORM_WEB
+#include <dsound.h>	// on web the buffer fake comes from frankPlatformWeb.h (phase 6)
+#endif
 #include "../../../oggvorbis/vorbis/include/vorbis/codec.h"
 #include "../../../oggvorbis/vorbis/include/vorbis/vorbisfile.h"
+
+#ifdef FRANK_PLATFORM_WEB
+// on web the music bypasses the streaming buffer entirely: the ogg decodes once via
+// Web Audio and loops on the browser's audio thread, so main-thread stalls can't
+// glitch it. these wrappers live in webSound.cpp.
+bool FrankWebMusicOpen(const WCHAR* filename, const char* data, int dataSize);
+void FrankWebMusicPlay(bool loop);
+void FrankWebMusicStop();
+void FrankWebMusicPause(bool pause);
+void FrankWebMusicSetVolume(float percent);
+void FrankWebMusicSetRate(float rate);
+bool FrankWebMusicIsPlaying();
+#endif
 
 const DWORD MusicControl::bufferSize = 65536;
 
@@ -186,7 +201,7 @@ bool MusicControl::Open( WCHAR *filename )
 {
 	if (!ds || !musicEnable || !filename || filename[0] == 0)
 		return false;
-	
+
 	wcsncpy_s(openFilename, filename, GameObjectStub::attributesLength);
 
 	if (fileOpened)
@@ -204,6 +219,18 @@ bool MusicControl::Open( WCHAR *filename )
 				return false;
 		}
 	}
+
+#ifdef FRANK_PLATFORM_WEB
+	// hand the raw ogg bytes to web audio (it copies synchronously); no vorbis
+	// decode and no streaming buffer on this path
+	fileOpened = FrankWebMusicOpen(filename, oggMemoryFile.dataPtr, oggMemoryFile.dataSize);
+	if (!oggMemoryFile.isPreLoaded && oggMemoryFile.dataPtr)
+	{
+		delete [] oggMemoryFile.dataPtr;
+		oggMemoryFile.dataPtr = NULL;
+	}
+	return fileOpened;
+#endif
 
 	vorbisCallbacks.read_func = VorbisRead;
 	vorbisCallbacks.close_func = VorbisClose;
@@ -273,6 +300,21 @@ void MusicControl::Close()
 
 void MusicControl::Close(SOggFile& oggFile)
 {
+#ifdef FRANK_PLATFORM_WEB
+	// no vorbis handle or ds buffer exists on the web path
+	if (!fileOpened)
+		return;
+	fileOpened = false;
+	FrankWebMusicStop();
+	if (oggFile.dataPtr && !oggFile.isPreLoaded)
+	{
+		delete [] oggFile.dataPtr;
+		oggFile.dataPtr = NULL;
+	}
+	done = true;
+	return;
+#endif
+
 	if (!dsBuffer || !fileOpened)
 		return;
 
@@ -300,19 +342,39 @@ ConsoleCommand(ConsoleCommandCallback_musicPause, musicPause);
 
 void MusicControl::Pause( bool _pause )
 {
+#ifdef FRANK_PLATFORM_WEB
+	if (pause == _pause)
+		return;
+	pause = _pause;
+	FrankWebMusicPause(pause);
+	return;
+#endif
+
 	if (!dsBuffer || pause == _pause)
 		return;
 
 	pause = _pause;
 
-	if (pause)	
-		dsBuffer->Stop();    
+	if (pause)
+		dsBuffer->Stop();
 	else
 		dsBuffer->Play(0, 0, DSBPLAY_LOOPING);
 }
 
 void MusicControl::Play( bool _loop )
 {
+#ifdef FRANK_PLATFORM_WEB
+	if (!fileOpened || !musicEnable)
+		return;
+	pause = false;
+	loop = _loop;
+	done = false;
+	almostDone = false;
+	FrankWebMusicSetVolume(masterVolume * volumeScale * transitionPercent);
+	FrankWebMusicPlay(loop);
+	return;
+#endif
+
 	if (!dsBuffer || !fileOpened || !musicEnable)
 		return;
 
@@ -320,7 +382,7 @@ void MusicControl::Play( bool _loop )
 	loop = _loop;
 	done = false;
 	almostDone = false;
-	
+
 	LONG lVolume = (LONG)(DSBVOLUME_MIN + masterVolume * volumeScale * transitionPercent * (DSBVOLUME_MAX - DSBVOLUME_MIN));
 	dsBuffer->SetVolume(lVolume);
 
@@ -330,6 +392,12 @@ void MusicControl::Play( bool _loop )
 
 void MusicControl::Stop()
 {
+#ifdef FRANK_PLATFORM_WEB
+	if (fileOpened)
+		FrankWebMusicStop();
+	return;
+#endif
+
 	if (!dsBuffer || !fileOpened)
 		return;
 
@@ -363,7 +431,24 @@ void MusicControl::Update()
 			transitionPercent = 1;
 		transitionPercent = CapPercent(transitionPercent);
 	}
-	
+
+#ifdef FRANK_PLATFORM_WEB
+	// web audio handles playback on its own thread; per frame we only push the
+	// current fade volume and time-scale rate
+	if (!fileOpened)
+		return;
+	if (!musicEnable)
+	{
+		Stop();
+		return;
+	}
+	FrankWebMusicSetRate(enableFrequencyScale ? frequencyScale : 1.0f);
+	FrankWebMusicSetVolume(masterVolume * volumeScale * transitionPercent);
+	if (!loop && !pause && !FrankWebMusicIsPlaying())
+		done = true;
+	return;
+#endif
+
 	if (!dsBuffer)
 		return;
 

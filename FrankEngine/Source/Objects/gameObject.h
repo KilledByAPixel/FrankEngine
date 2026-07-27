@@ -51,7 +51,9 @@ private:
 */
 ////////////////////////////////////////////////////////////////////////////////////////
 
+#ifndef FRANK_PLATFORM_WEB
 enum GameObjectType;
+#endif
 
 class GameObject : private Uncopyable
 {
@@ -91,7 +93,7 @@ public: // sound
 	static float defaultSoundDistanceMin;
 	static float defaultSoundDistanceMax;
 
-	virtual struct SoundObjectSmartPointer MakeSound(enum SoundID si, float volume = 1, float frequency = 1, float frequencyRandomness = defaultFrequencyRandomness, float distanceMin = defaultSoundDistanceMin, float distanceMax = defaultSoundDistanceMax);
+	virtual struct SoundObjectSmartPointer MakeSound(SoundID si, float volume = 1, float frequency = 1, float frequencyRandomness = defaultFrequencyRandomness, float distanceMin = defaultSoundDistanceMin, float distanceMax = defaultSoundDistanceMax);
 
 public: // game object information
 
@@ -499,7 +501,7 @@ inline XForm2 GameObject::GetXFInterpolated(float percent) const	{ return xfWorl
 inline XForm2 GameObject::GetXFInterpolated() const					{ return GetXFInterpolated(g_interpolatePercent); }
 inline Matrix44 GameObject::GetMatrixInterpolated() const			{ return Matrix44(GetXFInterpolated()); }
 inline bool GameObject::IsStatic() const							{ return (!physicsBody || physicsBody->GetType() == b2_staticBody); }
-inline Vector2 GameObject::GetVelocity() const						{ return physicsBody? physicsBody->GetLinearVelocity() : Vector2::Zero(); }
+inline Vector2 GameObject::GetVelocity() const						{ return physicsBody? Vector2(physicsBody->GetLinearVelocity()) : Vector2::Zero(); }
 
 inline void GameObject::SetVelocity(const Vector2& v)
 { 

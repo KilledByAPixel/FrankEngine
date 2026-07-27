@@ -158,20 +158,20 @@ inline const Vector2 FrankRand::GetRandomInCircle(float radius, float minRadius)
 */
 ////////////////////////////////////////////////////////////////////////////////////////
 
-inline Vector3::Vector3(const D3DXVECTOR3& v) :
-	D3DXVECTOR3(v)
+inline Vector3::Vector3(const FrankVec3Base& v) :
+	FrankVec3Base(v)
 {}
 
 inline Vector3::Vector3(float _x, float _y, float _z) :
-	D3DXVECTOR3(_x, _y, _z)
+	FrankVec3Base(_x, _y, _z)
 {}
 
 inline Vector3::Vector3(float _v) :
-	D3DXVECTOR3(_v, _v, _v)
+	FrankVec3Base(_v, _v, _v)
 {}
 
 inline Vector3::Vector3(const Vector2& v) :
-	D3DXVECTOR3(v.x, v.y, 0)
+	FrankVec3Base(v.x, v.y, 0)
 {}
 
 // quick way to get a randomized vector
@@ -208,13 +208,13 @@ inline const Vector3 Vector3::Normalize(float length) const
 inline const Vector3 Vector3::Normalize() const
 {
 	Vector3 result;
-	D3DXVec3Normalize(&result, this);
+	FrankVec3Normalize(result, *this);
 	return result;
 }
 
 inline Vector3& Vector3::NormalizeThis()
 {
-	D3DXVec3Normalize(this, this);
+	FrankVec3Normalize(*this, *this);
 	return *this;
 }
 
@@ -227,12 +227,12 @@ inline bool Vector3::IsNormalized() const
 
 inline float Vector3::Length() const
 {
-	return D3DXVec3Length(this);
+	return FrankVec3Length(*this);
 }
 
 inline float Vector3::LengthSquared() const
 {
-	return D3DXVec3LengthSq(this);
+	return FrankVec3LengthSq(*this);
 }
 
 inline float Vector3::LengthAndNormalize()
@@ -255,7 +255,7 @@ inline Vector3& Vector3::ZeroThis()
 
 inline float Vector3::Dot(const Vector3& v) const
 {
-	return D3DXVec3Dot(this, &v);
+	return FrankVec3Dot(*this, v);
 }
 
 inline const Vector3 Vector3::operator * (const Vector3& v) const
@@ -281,7 +281,7 @@ inline float Vector3::AngleBetween(const Vector3& v) const
 inline const Vector3 Vector3::Cross(const Vector3& v) const
 {
 	Vector3 result;
-	D3DXVec3Cross(&result, this, &v);
+	FrankVec3Cross(result, *this, v);
 	return result;
 }
 
@@ -321,48 +321,48 @@ inline const Vector3 Vector3::operator - () const
 }
 
 inline Vector3& Vector3::operator += (const Vector3& v)
-{ 
-	return (Vector3&)(*(D3DXVECTOR3*)this += v); 
+{
+	return (Vector3&)(*(FrankVec3Base*)this += v);
 }
 
-inline Vector3& Vector3::operator -= (const Vector3& v) 
-{ 
-	return (Vector3&)(*(D3DXVECTOR3*)this -= v); 
+inline Vector3& Vector3::operator -= (const Vector3& v)
+{
+	return (Vector3&)(*(FrankVec3Base*)this -= v);
 }
 
-inline Vector3& Vector3::operator *= (float scale) 
-{ 
-	return (Vector3&)(*(D3DXVECTOR3*)this *= scale); 
+inline Vector3& Vector3::operator *= (float scale)
+{
+	return (Vector3&)(*(FrankVec3Base*)this *= scale);
 }
 
-inline Vector3& Vector3::operator /= (float scale) 
-{ 
-	return (Vector3&)(*(D3DXVECTOR3*)this /= scale); 
+inline Vector3& Vector3::operator /= (float scale)
+{
+	return (Vector3&)(*(FrankVec3Base*)this /= scale);
 }
 
-inline const Vector3 Vector3::operator + (const Vector3& v) const 
-{ 
-	return *(D3DXVECTOR3*)this + v; 
+inline const Vector3 Vector3::operator + (const Vector3& v) const
+{
+	return *(FrankVec3Base*)this + v;
 }
 
-inline const Vector3 Vector3::operator - (const Vector3& v) const 
-{ 
-	return *(D3DXVECTOR3*)this - v; 
+inline const Vector3 Vector3::operator - (const Vector3& v) const
+{
+	return *(FrankVec3Base*)this - v;
 }
 
-inline const Vector3 Vector3::operator * (float scale) const 
-{ 
-	return *(D3DXVECTOR3*)this * scale; 
+inline const Vector3 Vector3::operator * (float scale) const
+{
+	return *(FrankVec3Base*)this * scale;
 }
 
-inline const Vector3 Vector3::operator / (float scale) const 
-{ 
-	return *(D3DXVECTOR3*)this / scale; 
+inline const Vector3 Vector3::operator / (float scale) const
+{
+	return *(FrankVec3Base*)this / scale;
 }
 
-inline const Vector3 operator * (float scale, const Vector3& v) 
-{ 
-	return (D3DXVECTOR3&)v * scale; 
+inline const Vector3 operator * (float scale, const Vector3& v)
+{
+	return (FrankVec3Base&)v * scale;
 }
 
 ///////////////////////////////////////
@@ -528,7 +528,13 @@ inline const Vector2 Vector2::BuildRandomInCircle(float radius, float minRadius)
 	return FrankRand::GetRandomInCircle(radius, minRadius);
 }
 
-inline const D3DXVECTOR3 Vector2::GetD3DXVECTOR3(float z) const 
+inline const FrankVec3Base Vector2::GetVec3Base(float z) const
+{
+	return FrankVec3Base(x, y, z);
+}
+
+// on web D3DXVECTOR3 is the stand-in from frankPlatformWeb.h (phase 5)
+inline const D3DXVECTOR3 Vector2::GetD3DXVECTOR3(float z) const
 {
 	return D3DXVECTOR3(x, y, z);
 }
@@ -911,19 +917,19 @@ inline bool Vector2::InsideBox(const XForm2& xf, const Vector2& size, const Vect
 */
 ////////////////////////////////////////////////////////////////////////////////////////
 
-inline Matrix44::Matrix44(const Vector2& v) 
-{ 
-	D3DXMatrixTranslation(&matrix, v.x, v.y, 0.0f); 
+inline Matrix44::Matrix44(const Vector2& v)
+{
+	FrankMatrixTranslation(matrix, v.x, v.y, 0.0f);
 }
 
 inline Matrix44::Matrix44(const Quaternion& q)
 {
-	D3DXMatrixRotationQuaternion(&matrix, &q.GetD3DXQuaternion());
+	FrankMatrixRotationQuaternion(matrix, q.GetQuaternionBase());
 }
 
 inline Matrix44::Matrix44(const XForm2& xf, float z)
 {
-	D3DXMatrixRotationZ(&matrix, xf.angle);
+	FrankMatrixRotationZ(matrix, xf.angle);
 	SetPos(Vector3(xf.position.x, xf.position.y, z));
 }
 
@@ -950,27 +956,27 @@ inline const Matrix44 Matrix44::operator - () const  {  return Matrix44(-matrix)
 
 inline const Matrix44 Matrix44::Inverse() const
 {
-	D3DXMATRIX m;
-	D3DXMatrixInverse(&m, NULL, &matrix);
+	FrankMat44Base m;
+	FrankMatrixInverse(m, matrix);
 	return Matrix44(m);
 }
 
 inline Matrix44& Matrix44::InverseThis()
 {
-	D3DXMatrixInverse(&matrix, NULL, &matrix);
+	FrankMatrixInverse(matrix, matrix);
 	return *this;
 }
 
 inline const Matrix44 Matrix44::Transpose() const
 {
 	Matrix44 m;
-	D3DXMatrixTranspose(&m.GetD3DXMatrix(), &matrix);
+	FrankMatrixTranspose(m.matrix, matrix);
 	return m;
 }
 
 inline Matrix44& Matrix44::TransposeThis()
 {
-	D3DXMatrixTranspose(&matrix, &matrix);
+	FrankMatrixTranspose(matrix, matrix);
 	return *this;
 }
 
@@ -983,7 +989,8 @@ inline const Matrix44 Matrix44::operator + (const Matrix44& m) const { return Ma
 inline const Matrix44 Matrix44::operator - (const Matrix44& m) const { return Matrix44(matrix - m.matrix); }
 inline const Matrix44 Matrix44::operator * (float s) const { return Matrix44(matrix * s); }
 inline const Matrix44 Matrix44::operator / (float s) const { return Matrix44(matrix / s); }
-inline const Matrix44 operator * (float s, const Matrix44& m) { return Matrix44(m * m.GetD3DXMatrix()); }
+// note: preserves the existing engine behavior, which ignores s and returns m*m
+inline const Matrix44 operator * (float s, const Matrix44& m) { return m * m; }
 
 ///////////////////////////////////////
 // Transform Constructors
@@ -992,14 +999,14 @@ inline const Matrix44 operator * (float s, const Matrix44& m) { return Matrix44(
 inline const Matrix44 Matrix44::BuildRotate(float x, float y, float z)
 {
 	Matrix44 m;
-	D3DXMatrixRotationYawPitchRoll(&m.GetD3DXMatrix(), x, y, z);
+	FrankMatrixRotationYawPitchRoll(m.matrix, x, y, z);
 	return m;
 }
 
 inline const Matrix44 Matrix44::BuildXFormZ(const Vector2& pos, float angle, float zPlain)
 {
 	Matrix44 m;
-	D3DXMatrixRotationZ(&m.GetD3DXMatrix(), angle);
+	FrankMatrixRotationZ(m.matrix, angle);
 	m.SetPos(Vector3(pos.x, pos.y, zPlain));
 	return m;
 }
@@ -1007,7 +1014,7 @@ inline const Matrix44 Matrix44::BuildXFormZ(const Vector2& pos, float angle, flo
 inline const Matrix44 Matrix44::BuildRotateZ(float angle)
 {
 	Matrix44 m;
-	D3DXMatrixRotationZ(&m.GetD3DXMatrix(), angle);
+	FrankMatrixRotationZ(m.matrix, angle);
 	return m;
 }
 
@@ -1019,21 +1026,21 @@ inline const Matrix44 Matrix44::BuildRotate(const Vector3& v)
 inline const Matrix44 Matrix44::BuildRotate(const Vector3& axis, float angle)
 {
 	Matrix44 m;
-	D3DXMatrixRotationAxis(&m.GetD3DXMatrix(), &axis, angle);
+	FrankMatrixRotationAxis(m.matrix, axis, angle);
 	return m;
 }
 
 inline const Matrix44 Matrix44::BuildScale(float x, float y, float z)
 {
 	Matrix44 m;
-	D3DXMatrixScaling(&m.GetD3DXMatrix(), x, y, z);
+	FrankMatrixScaling(m.matrix, x, y, z);
 	return m;
 }
 
 inline const Matrix44 Matrix44::BuildScale(float scale)
 {
 	Matrix44 m;
-	D3DXMatrixScaling(&m.GetD3DXMatrix(), scale, scale, scale);
+	FrankMatrixScaling(m.matrix, scale, scale, scale);
 	return m;
 }
 
@@ -1045,7 +1052,7 @@ inline const Matrix44 Matrix44::BuildScale(const Vector3& v)
 inline const Matrix44 Matrix44::BuildTranslate(float x, float y, float z)
 {
 	Matrix44 m;
-	D3DXMatrixTranslation(&m.GetD3DXMatrix(), x, y, z);
+	FrankMatrixTranslation(m.matrix, x, y, z);
 	return m;
 }
 
@@ -1057,21 +1064,28 @@ inline const Matrix44 Matrix44::BuildTranslate(const Vector3& v)
 inline const Matrix44 Matrix44::BuildLookAtLH(const Vector3& pos, const Vector3& at, const Vector3& up)
 {
 	Matrix44 m;
-	D3DXMatrixLookAtLH(&m.GetD3DXMatrix(), &pos, &at, &up);
+	FrankMatrixLookAtLH(m.matrix, pos, at, up);
+	return m;
+}
+
+inline const Matrix44 Matrix44::BuildOrthoLH(float width, float height, float zNear, float zFar)
+{
+	Matrix44 m;
+	FrankMatrixOrthoLH(m.matrix, width, height, zNear, zFar);
 	return m;
 }
 
 inline const Vector3 Matrix44::TransformCoord(const Vector3& v) const
 {
-	D3DXVECTOR3 v_out;
-	D3DXVec3TransformCoord(&v_out, &v, &matrix);
+	FrankVec3Base v_out;
+	FrankVec3TransformCoord(v_out, v, matrix);
 	return Vector3(v_out);
 }
 
 inline const Vector3 Matrix44::TransformNormal(const Vector3& v) const
 {
-	D3DXVECTOR3 v_out;
-	D3DXVec3TransformNormal(&v_out, &v, &matrix);
+	FrankVec3Base v_out;
+	FrankVec3TransformNormal(v_out, v, matrix);
 	return Vector3(v_out);
 }
 
@@ -1120,18 +1134,11 @@ inline void Matrix44::GetYawPitchRoll(Vector3& rotation) const
 // Class Statics
 ///////////////////////////////////////
 
-inline const Matrix44 Matrix44::Identity()	
-{ 
-	return Matrix44
-	(
-		D3DXMATRIX
-		(
-			1,	0,	0,	0,
-			0,	1,	0,	0,
-			0,	0,	1,	0,
-			0,	0,	0,	1
-		)
-	);
+inline const Matrix44 Matrix44::Identity()
+{
+	Matrix44 m;
+	FrankMatrixIdentity(m.matrix);
+	return m;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1142,18 +1149,19 @@ inline const Matrix44 Matrix44::Identity()
 
 inline Quaternion::Quaternion() {}
 
-inline Quaternion::Quaternion(const D3DXQUATERNION& q) : quaternion(q) {}
+inline Quaternion::Quaternion(const FrankQuatBase& q) : quaternion(q) {}
 
-inline Quaternion::Quaternion(const Matrix44& m) {	D3DXQuaternionRotationMatrix(&quaternion, &m.GetD3DXMatrix()); }
+#ifndef FRANK_PLATFORM_WEB
+inline Quaternion::Quaternion(const D3DXQUATERNION& q) : quaternion(q.x, q.y, q.z, q.w) {}
+#endif
 
-inline Quaternion::Quaternion(const Vector3& rotation) { D3DXQuaternionRotationYawPitchRoll(&quaternion, rotation.x, rotation.y, rotation.z); }
+inline Quaternion::Quaternion(const Matrix44& m) {	FrankQuaternionRotationMatrix(quaternion, m.GetMatrixBase()); }
 
-inline Quaternion::Quaternion(const Vector3& axis, float angle) { D3DXQuaternionRotationAxis(&quaternion, &axis, angle); }
+inline Quaternion::Quaternion(const Vector3& rotation) { FrankQuaternionRotationYawPitchRoll(quaternion, rotation.x, rotation.y, rotation.z); }
+
+inline Quaternion::Quaternion(const Vector3& axis, float angle) { FrankQuaternionRotationAxis(quaternion, axis, angle); }
 
 inline Quaternion::Quaternion(float x, float y, float z, float w) : quaternion(x, y, z, w) {}
-
-inline D3DXQUATERNION& Quaternion::GetD3DXQuaternion() { return quaternion; }
-inline const D3DXQUATERNION& Quaternion::GetD3DXQuaternion() const { return quaternion; }
 
 ///////////////////////////////////////
 // Assignment Operators
@@ -1208,48 +1216,49 @@ inline const Quaternion Quaternion::operator * (float s) const
 inline const Quaternion Quaternion::operator / (float s) const
 { return Quaternion(quaternion / s); }
 
+// note: preserves the existing engine behavior, which ignores s and returns q*q
 inline const Quaternion operator * (float s, const Quaternion& q)
-{ return Quaternion(q * q.GetD3DXQuaternion()); }
+{ return q * q; }
 
 inline const Quaternion Quaternion::Inverse() const
 {
 	Quaternion q;
-	D3DXQuaternionInverse(&q.GetD3DXQuaternion(), &GetD3DXQuaternion());
+	FrankQuaternionInverse(q.quaternion, quaternion);
 	return q;
 }
 
 inline Quaternion& Quaternion::SlerpThis(const Quaternion& q, float percent)
 {
-	D3DXQuaternionSlerp(&quaternion, &quaternion, &q.quaternion, percent);
+	FrankQuaternionSlerp(quaternion, quaternion, q.quaternion, percent);
 	return *this;
 }
 
 inline const Quaternion Quaternion::Slerp(const Quaternion& q, float percent) const
 {
 	Quaternion qOut;
-	D3DXQuaternionSlerp(&qOut.GetD3DXQuaternion(), &quaternion, &q.quaternion, percent);
+	FrankQuaternionSlerp(qOut.quaternion, quaternion, q.quaternion, percent);
 	return qOut;
 }
 
-inline float Quaternion::DotProduct(const Quaternion& q) const { return D3DXQuaternionDot(&quaternion, &q.quaternion); }
+inline float Quaternion::DotProduct(const Quaternion& q) const { return FrankQuaternionDot(quaternion, q.quaternion); }
 
 inline const Quaternion Quaternion::Normalize() const
 {
 	Quaternion q;
-	D3DXQuaternionNormalize(&q.GetD3DXQuaternion(), &quaternion);
+	FrankQuaternionNormalize(q.quaternion, quaternion);
 	return q;
 }
 
 inline Quaternion& Quaternion::NormalizeThis()
 {
-	D3DXQuaternionNormalize(&quaternion, &quaternion);
+	FrankQuaternionNormalize(quaternion, quaternion);
 	return *this;
 }
 
 inline void Quaternion::GetAxisAngle(Vector3& axis, float& angle) const
 {
-	D3DXVECTOR3 v;
-	D3DXQuaternionToAxisAngle(&quaternion, &v, &angle);
+	FrankVec3Base v;
+	FrankQuaternionToAxisAngle(quaternion, v, angle);
 	axis = Vector3(v);
 }
 

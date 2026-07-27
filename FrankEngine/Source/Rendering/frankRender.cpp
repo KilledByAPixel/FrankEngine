@@ -98,10 +98,15 @@ void FrankRender::InitDeviceObjects()
 	}
 }
 
-// release only what a device reset actually invalidates
-// textures are deliberately kept, see ReleaseTextures() below
 void FrankRender::DestroyDeviceObjects()
 {
+	for (int i = 0; i < MAX_TEXTURE_COUNT; i++)
+	for (int j = 0; j < TT_Count; j++)
+	{
+		SAFE_RELEASE(textures[i][j].texture);
+		textures[i][j] = TextureWrapper();
+	}
+
 	primitiveQuad.SafeRelease();
 	primitiveQuadOutline.SafeRelease();
 	primitiveCircle.SafeRelease();
@@ -111,8 +116,9 @@ void FrankRender::DestroyDeviceObjects()
 	primitiveTris.SafeRelease();
 	SAFE_RELEASE(normalMapConstantTable);
 	SAFE_RELEASE(normalMapShader);
-}
 
+	ClearTextureList();
+}
 
 bool FrankRender::BeginRender(bool needsClear, const Color& clearColor, DWORD clearFlags)
 {

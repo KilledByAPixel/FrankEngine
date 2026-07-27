@@ -87,6 +87,7 @@ Physics::Physics()
 	world->SetDebugDraw(&g_physicsRender);
 }
 
+
 Physics::~Physics()
 {
 	SAFE_DELETE(world);

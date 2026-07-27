@@ -11,7 +11,9 @@
 
 #define MAX_TEXTURE_COUNT	(256)
 
+#ifndef FRANK_PLATFORM_WEB
 enum TextureID;
+#endif
 const TextureID Texture_Invalid				= TextureID(0);
 const TextureID Texture_Smoke				= TextureID(1);
 const TextureID Texture_Circle				= TextureID(2);
@@ -28,16 +30,9 @@ public:
 	FrankRender();
 
 	void InitDeviceObjects();
-
-	// releases only what a device reset invalidates, textures are kept
 	void DestroyDeviceObjects();
 
 	bool LoadTexture(const WCHAR* textureName, TextureID ti);
-
-	// unloads every texture. do NOT call this for a device reset, textures are
-	// D3DPOOL_MANAGED so directx restores them itself, and reloading them from
-	// disk was the main cost of switching window modes. shutdown or explicit
-	// asset reload only, see GameControlBase::ReleaseAssets().
 	void ReleaseTextures();
 	void ReloadModifiedTextures();
 	
@@ -371,13 +366,23 @@ public:	// rendering functions
 			stride = _stride;
 			fvf = _fvf;
 
+			#ifdef FRANK_PLATFORM_WEB
+			// real memory so shared code can Lock/write; the web draw path parses the fvf
+			vb = new FrankWebVertexBuffer(vertexCount*stride);
+			return true;
+			#else
 			const D3DPOOL pool = D3DPOOL_DEFAULT;
 			const DWORD usage = (dynamic? (D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC) : D3DUSAGE_WRITEONLY);
 
 			return SUCCEEDED(DXUTGetD3D9Device()->CreateVertexBuffer(vertexCount*stride, usage, fvf, pool, &vb, NULL));
+			#endif
 		}
 
+		#ifdef FRANK_PLATFORM_WEB
+		void SafeRelease() { if (vb) { delete vb; vb = NULL; } }
+		#else
 		void SafeRelease() { SAFE_RELEASE(vb); }
+		#endif
 	};
 
 	void Render
@@ -605,6 +610,12 @@ inline void FrankRender::Render
 	DWORD fvf
 )
 {
+	#ifdef FRANK_PLATFORM_WEB
+	// phase 5: draw through the GL backend (material-color path, current device state)
+	extern void FrankWebRenderRawPrimitive(const Matrix44& matrix, const Color& color, FrankWebTexture* texture,
+		FrankWebVertexBuffer* vb, int primitiveCount, int primitiveType, UINT stride, DWORD fvf);
+	FrankWebRenderRawPrimitive(matrix, color, texture, vb, primitiveCount, primitiveType, stride, fvf);
+	#else
 	ASSERT(isInRenderBlock);
 
 	if (primitiveCount <= 0)
@@ -621,8 +632,8 @@ inline void FrankRender::Render
 	// set up the color
 	const D3DMATERIAL9 material =
 	{
-		{1, 1, 1, color.a}, 
-		{color.r, color.g, color.b, 1}, 
+		{1, 1, 1, color.a},
+		{color.r, color.g, color.b, 1},
 		{0, 0, 0, 0},
 		{0, 0, 0, 0}, 0
 	};
@@ -635,4 +646,5 @@ inline void FrankRender::Render
     pd3dDevice->SetStreamSource(0, vb, 0, stride);
     pd3dDevice->SetFVF(fvf);
 	pd3dDevice->DrawPrimitive(primitiveType, 0, primitiveCount);
+	#endif
 }

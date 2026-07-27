@@ -9,7 +9,9 @@
 
 #include "../terrain/terrainTile.h"
 
+#ifndef FRANK_PLATFORM_WEB
 enum GameMaterialIndex;
+#endif
 const GameMaterialIndex GMI_Invalid = GameMaterialIndex(0);
 const GameMaterialIndex GMI_Start = GameMaterialIndex(1);
 struct GameSurfaceInfo;

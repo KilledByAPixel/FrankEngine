@@ -43,7 +43,13 @@ TextureID DeferredRender::overbrightTexture = Texture_Circle;
 DeferredRender::RenderPass DeferredRender::renderPass = DeferredRender::RenderPass_diffuse;
 int DeferredRender::dynamicLightCount = 0;
 int DeferredRender::simpleLightCount = 0;
+#ifdef FRANK_PLATFORM_WEB
+// GL has no d3d9 half-texel offset (gl pixel centers already align with texel
+// centers), so the compensation must be zero or everything shifts up-left
+static const Vector2 halfPixel(0, 0);
+#else
 static const Vector2 halfPixel(-1, 1);
+#endif
 bool DeferredRender::SpecularRenderBlock::active = false;
 bool DeferredRender::BackgroundRenderBlock::active = false;
 bool DeferredRender::TransparentRenderBlock::active = false;
@@ -75,6 +81,13 @@ ConsoleCommandSimple(bool, lightPixelRoundingEnable, true);
 // enable lighting
 bool DeferredRender::lightEnable = true;
 ConsoleCommand(DeferredRender::lightEnable, lightEnable);
+
+#ifdef FRANK_PLATFORM_WEB
+// A/B switches for the nvidia/chrome flicker hunt: the blur passes stamp a shared
+// swap texture back over their target, which is where stale regions get injected
+ConsoleCommandSimple(bool, webShadowMapBlur, true);
+ConsoleCommandSimple(bool, webEmissiveBlur, true);
+#endif
 
 // if any more dynamic lights then this are needed per frame they will be skipped
 int DeferredRender::maxDynamicLights = 24;
@@ -1117,9 +1130,17 @@ void DeferredRender::GlobalUpdate()
 		
 			// sort dynamic lights so higher priority lights are first
 			dynamicLights.sort(Light::SortCompare);
-			for (Light* dynamicLight : dynamicLights)
-					UpdateDynamicLight(*dynamicLight);
-			UpdateSimpleLights(simpleLights);
+#ifdef FRANK_PLATFORM_WEB
+			// flicker bisection (webStripMask): strip systems AROUND the shadow pass while
+			// its chunk detector keeps counting drops (RETRIES) as an objective sensor
+			extern int webStripMask;
+			if (!(webStripMask & 1))
+#endif
+			{
+				for (Light* dynamicLight : dynamicLights)
+						UpdateDynamicLight(*dynamicLight);
+				UpdateSimpleLights(simpleLights);
+			}
 		}
 
 		if (g_gameControlBase->IsEditMode() && !g_gameControlBase->IsEditPreviewMode() || !lightEnable)
@@ -1128,7 +1149,14 @@ void DeferredRender::GlobalUpdate()
 		 if (showTexture == 3)
 			 return; // test display of shadow map
 
+#ifdef FRANK_PLATFORM_WEB
+		extern int webStripMask;
+		if (!(webStripMask & 2))
+#endif
 		RenderDirectionalPass();
+#ifdef FRANK_PLATFORM_WEB
+		if (!(webStripMask & 4))
+#endif
 		RenderEmissivePass();
 
 		if (lightEnable && visionEnable)
@@ -1166,8 +1194,17 @@ void DeferredRender::GlobalRender()
 	if (g_gameControlBase->IsEditMode() && !g_gameControlBase->IsEditPreviewMode() || !lightEnable)
 		return;
 
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// flicker bisection: skip the final lighting composite (see webStripMask)
+		extern int webStripMask;
+		if (webStripMask & 8)
+			return;
+	}
+#endif
+
 	IDirect3DDevice9* pd3dDevice = DXUTGetD3D9Device();
-	
+
 	// save the camera transforms
 	D3DXMATRIX viewMatrixOld, projectionMatrixOld;
 	pd3dDevice->GetTransform(D3DTS_VIEW, &viewMatrixOld);
@@ -1483,6 +1520,11 @@ void DeferredRender::SetFiltering(bool forceLinear)
 
 bool DeferredRender::GetLightValue(const Vector2& pos, float& value, float sampleRadius)
 {
+	#ifdef FRANK_PLATFORM_WEB
+	// gpu readback not supported on the web build (unused by shipping games)
+	value = 0;
+	return false;
+	#else
 	// warning: this function is very slow
     HRESULT hr;
 
@@ -1560,6 +1602,7 @@ bool DeferredRender::GetLightValue(const Vector2& pos, float& value, float sampl
 	SAFE_RELEASE(plainSurface);
 
 	return isValid;
+	#endif // !FRANK_PLATFORM_WEB
 }
 
 void DeferredRender::CycleShowTexture()
@@ -1706,6 +1749,56 @@ void DeferredRender::RenderShadowMap()
 		renderPass = RenderPass_diffuse;
 	}
 	g_render->EndRender();
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// second pass, no clear (union): a dropped work window kills adjacent
+		// commands together, but this lands hundreds of commands later. terrain only -
+		// opaque terrain re-draws idempotently, blended casters would double-darken
+		extern int webShadowRender2;
+		extern bool webShadowPass2Active;
+		extern bool webShadowRerenderActive;
+		if (webShadowRender2)
+		{
+			webShadowPass2Active = true;
+			webShadowRerenderActive = true;
+			g_render->BeginRender(false);
+			renderPass = RenderPass_lightShadow;
+			g_gameControlBase->RenderInterpolatedObjects();
+			renderPass = RenderPass_diffuse;
+			g_render->EndRender();
+			webShadowPass2Active = false;
+			webShadowRerenderActive = false;
+		}
+	}
+#endif
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// flicker probe: sample the shadow map before the blur/directional stages touch
+		// it - and if the content is missing (the below-API dropped-work bug: legal,
+		// error-free, gpu-synced draws intermittently produce no pixels on chrome's
+		// d3d11 backend under contention), re-render the pass. the drop is transient,
+		// so a retry lands; cost is one extra shadow pass only on glitch frames.
+		extern void WebFlickerProbeShadowPassDone();
+		extern bool WebShadowMapLooksBad();
+		extern int webShadowRetryCount;
+		extern bool webShadowRerenderActive;
+		WebFlickerProbeShadowPassDone();
+		for (int retry = 0; retry < 2 && WebShadowMapLooksBad(); ++retry)
+		{
+			++webShadowRetryCount;
+			// stats frozen: the detector's verts-stable gate must keep seeing pass-1
+			// counts or it blinds itself for the frame after every retry
+			webShadowRerenderActive = true;
+			g_render->BeginRender(true);
+			renderPass = RenderPass_lightShadow;
+			g_gameControlBase->RenderInterpolatedObjects();
+			renderPass = RenderPass_diffuse;
+			g_render->EndRender();
+			webShadowRerenderActive = false;
+			WebFlickerProbeShadowPassDone();
+		}
+	}
+#endif
 	if (shadowSaveTextures)
 		D3DXSaveSurfaceToFile( L"shadowMapBuffer.jpg", D3DXIFF_JPG, renderSurface, NULL, NULL );
 	SAFE_RELEASE(renderSurface);
@@ -1736,7 +1829,21 @@ void DeferredRender::RenderShadowMap()
 
 	// apply a slight blur to the shadow map to help reduce artifacts
 	SetFiltering(true);
+#ifdef FRANK_PLATFORM_WEB
+	// live-switchable while chasing the nvidia/chrome region-drop flicker: the blur's
+	// swap-texture pass is where stale content gets stamped into the shadow map
+	if (webShadowMapBlur)
+#endif
 	ApplyBlur(textureShadowMap, Vector2(shadowMapTextureSize), 1, 1, 1);
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// flicker probe: ApplyBlur pointer-SWAPS textures, so tell the probe which
+		// texture is now the real shadow map the lights will sample - end-of-frame
+		// reads of the frame-start fbo were reading the retired swap texture
+		extern void WebFlickerProbeShadowFinal(LPDIRECT3DTEXTURE9 texture);
+		WebFlickerProbeShadowFinal(textureShadowMap);
+	}
+#endif
 
 	pd3dDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 	pd3dDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
@@ -1796,6 +1903,9 @@ void DeferredRender::RenderEmissivePass()
 	// force linear filtering
 	SetFiltering(true);
 
+#ifdef FRANK_PLATFORM_WEB
+	if (webEmissiveBlur)
+#endif
 	ApplyBlur(textureEmissive, Vector2(emissiveTextureSize), emissiveBlurAlpha, emissiveBlurSize, emissiveBlurPassCount);
 	
 	if (emissiveAlpha > 0)

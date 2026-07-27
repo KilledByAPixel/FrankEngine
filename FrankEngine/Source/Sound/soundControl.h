@@ -9,14 +9,20 @@
 
 #pragma once
 
+#ifndef FRANK_PLATFORM_WEB
 #include "dsound.h"
+#endif
 #include "../sound/musicControl.h"
 #include "../objects/gameObject.h"
+#ifndef FRANK_PLATFORM_WEB
 #include "../DXUT/optional/SDKsound.h"
+#endif
 
 extern class SoundControl* g_sound;
 
+#ifndef FRANK_PLATFORM_WEB
 enum SoundID;
+#endif
 const SoundID Sound_Invalid	= SoundID(0);
 
 enum class SoundFlags
@@ -97,7 +103,7 @@ private:
 
 	GameObjectSmartPointer<> parentObjectHandle;
 	Handle handle = 0;
-	CSound::BufferWrapper bufferWrapper;
+	CSound::BufferWrapper bufferWrapper;	// web fake lives in frankPlatformWeb.h (phase 6)
 	SoundAsset* soundAsset = NULL;
 	float distanceMin = 0;
 	float distanceMax = 0;
@@ -146,6 +152,7 @@ public:
 	static float dopplerFactor;
 	static float dopplerDistanceFactor;
 	static bool enableTimeScale;		// should we update soundAssets with the time scale
+	static bool appHasFocus;			// false while the window/tab is in the background - sounds freeze like pause
 	static bool cameraIsListener;		// is camera or player listener
 	static bool soundEnable;
 	static bool soundDebug;

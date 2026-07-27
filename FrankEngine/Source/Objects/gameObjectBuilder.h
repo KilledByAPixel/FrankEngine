@@ -11,7 +11,9 @@
 
 #include "../objects/gameObject.h"
 
+#ifndef FRANK_PLATFORM_WEB
 enum GameObjectType;
+#endif
 const GameObjectType GAME_OBJECT_TYPE_MAX_COUNT = (GameObjectType)256;
 const GameObjectType GAME_OBJECT_TYPE_INVALID = (GameObjectType)0;
 
@@ -153,21 +155,23 @@ public: // stub data
 };
 
 // use this macro to expose a class
+// (L"" #name widening and plain :: qualification are the conformant forms of the
+// old MSVC-only L#name / name##:: spellings; identical expansion on windows)
 #define	GAME_OBJECT_DEFINITION(className, stubTexture, stubColor) \
 static GameObject* _##className##Build(const GameObjectStub& stub) \
 { return new className(stub); }				\
 static ObjectTypeInfo _##className##Info	\
 (											\
-	L#className, 							\
+	L"" #className, 						\
 	GOT_##className, 						\
 	_##className##Build, 					\
-	className##::IsSerializable, 			\
-	className##::StubRender, 				\
-	className##::StubRenderMap, 			\
-	className##::StubAttributesDescription, \
-	className##::StubDescription, 			\
-	className##::StubAttributesDefault, 	\
-	className##::StubSelectSize,			\
+	className::IsSerializable, 				\
+	className::StubRender, 					\
+	className::StubRenderMap, 				\
+	className::StubAttributesDescription,	\
+	className::StubDescription, 			\
+	className::StubAttributesDefault, 		\
+	className::StubSelectSize,				\
 	stubTexture, 							\
 	stubColor								\
 );

@@ -23,7 +23,7 @@ FrankFont::FrankFont(TextureID _texture, WCHAR* dataFilenameWide) :
 	texture(_texture)
 {
 	{
-		ifstream inFile(dataFilenameWide, ios::in);
+		ifstream inFile(FRANK_FILENAME(dataFilenameWide), ios::in);
 		if (inFile.is_open())
 		{
 			// read data from file
@@ -32,12 +32,12 @@ FrankFont::FrankFont(TextureID _texture, WCHAR* dataFilenameWide) :
 			return;
 		}
 	}
-	
+
 	{
 		// hack: check data/fonts
 		wstring filename(L"data/fonts/");
 		filename.append(dataFilenameWide);
-		ifstream inFile(filename, ios::in);
+		ifstream inFile(FRANK_FILENAME(filename.c_str()), ios::in);
 		if (inFile.is_open())
 		{
 			// read data from file
@@ -46,6 +46,21 @@ FrankFont::FrankFont(TextureID _texture, WCHAR* dataFilenameWide) :
 			return;
 		}
 	}
+
+	#ifdef FRANK_PLATFORM_WEB
+	{
+		// web has no exe resources; the font data ships in the preloaded data dir
+		wstring filename(L"data/");
+		filename.append(dataFilenameWide);
+		ifstream inFile(FRANK_FILENAME(filename.c_str()), ios::in);
+		if (inFile.is_open())
+		{
+			ParseFont( inFile, charSet );
+			inFile.close();
+			return;
+		}
+	}
+	#endif
 
 	// Get pointer and size to resource
 	HRSRC hRes = FindResource(0, dataFilenameWide, RT_RCDATA);

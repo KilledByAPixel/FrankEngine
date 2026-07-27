@@ -397,6 +397,14 @@ void MiniMap::RenderWorldSpace(const XForm2& xf, const Vector2& size, const Colo
 
 void MiniMap::RenderMapHiddenToTexture()
 {
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// see RenderToTexture - the reveal path redraws ~2k patch-cover quads per dirty
+		extern int webMapRender;
+		if (!webMapRender)
+			return;
+	}
+#endif
 	MapRenderBlock mapRenderBlock(mapHiddenTexture);
 	
 	DXUTGetD3D9Device()->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
@@ -422,7 +430,19 @@ void MiniMap::RenderToTexture()
 {
 	if (!g_terrain)
 		return;
-	
+
+#ifdef FRANK_PLATFORM_WEB
+	{
+		// the full-planet map render is ~524k individual tile draws (~11M gl calls) in
+		// ONE frame on web - a massive command flood at startup and on every death
+		// reload. skippable (console webMapRender 0 or ?nomap in the url) for flicker
+		// bisection and gl-trace capture; the map just stays black
+		extern int webMapRender;
+		if (!webMapRender)
+			return;
+	}
+#endif
+
 	CDXUTPerfEventGenerator( DXUT_PERFEVENTCOLOR, L"MiniMap::RenderToTexture()" );
 	{
 		MapRenderBlock mapRenderBlock(mapFullTexture);

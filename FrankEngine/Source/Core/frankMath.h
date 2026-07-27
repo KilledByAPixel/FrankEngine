@@ -9,9 +9,27 @@
 
 #pragma once
 
+#include "frankMathBase.h"
+
+// declared here as well as frankEngine.h because Interpolated<T> refers to it and
+// conformant two-phase template lookup needs it visible at definition time
+extern float g_interpolatePercent;
+
 namespace FrankMath {
 
 using namespace std;
+
+#ifdef FRANK_PLATFORM_WEB
+// D3DX math names used textually by shared TUs compiled on web (deferredRender.cpp);
+// FrankMat44Base is layout- and convention-identical to D3DXMATRIX (phase 1)
+typedef FrankMat44Base D3DXMATRIX;
+typedef FrankMat44Base D3DMATRIX;
+inline void D3DXMatrixIdentity(D3DXMATRIX* m)								{ FrankMatrixIdentity(*m); }
+inline void D3DXMatrixTranslation(D3DXMATRIX* m, float x, float y, float z)	{ FrankMatrixTranslation(*m, x, y, z); }
+inline void D3DXMatrixScaling(D3DXMATRIX* m, float x, float y, float z)		{ FrankMatrixScaling(*m, x, y, z); }
+inline void D3DXMatrixRotationZ(D3DXMATRIX* m, float angle)					{ FrankMatrixRotationZ(*m, angle); }
+inline void D3DXMatrixOrthoLH(D3DXMATRIX* m, float w, float h, float zn, float zf) { FrankMatrixOrthoLH(*m, w, h, zn, zf); }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////
 /*
@@ -56,7 +74,11 @@ struct Box2AABB;
 
 // basic assert functionality
 #ifndef _ASSERTS_DISABLE
+#ifdef _MSC_VER
 #define ASSERT(e) { if (!(e)) {_CrtDbgBreak(); } }
+#else
+#define ASSERT(e) { if (!(e)) {__builtin_trap(); } }
+#endif
 #else
 #define ASSERT(unused) {}
 #endif
@@ -171,8 +193,8 @@ inline float EaseOutCircle(float p)		{ return sqrtf(p);  }
 inline float EaseInOutCirc(float p)		{ return 0.5f * ((p < 0.5f) ? (1 - sqrtf(1 - 2 * p)) : (1 + sqrtf(2 * p - 1))); }
 
 inline float EaseInBack(float p)		{ return p * p * (2.70158f * p - 1.70158f); }
-inline float EaseOutBack(float p)		{ return  1 + (--p) * p  * (2.70158f * p  + 1.70158f);  }
-inline float EaseInOutBack(float p)		{ return (p < 0.5f) ? (p * p * (7 * p - 2.5f) * 2) : (1 + (--p) * p * 2 * (7 * p + 2.5f)); }
+inline float EaseOutBack(float p)		{ p -= 1; return  1 + p * p  * (2.70158f * p  + 1.70158f);  }
+inline float EaseInOutBack(float p)		{ if (p < 0.5f) return p * p * (7 * p - 2.5f) * 2; p -= 1; return 1 + p * p * 2 * (7 * p + 2.5f); }
 
 inline float EaseOutElastic(float p, float elasticity = 0.7f, float bounces = 5) { return p = ((1 - cosf(p*PI*bounces))* (1 - p) + p / elasticity) * elasticity; }
 inline float EaseInElastic(float p, float elasticity = 0.7f, float bounces = 5) { return 1 - EaseOutElastic(1 - p, elasticity, bounces); }
@@ -213,23 +235,31 @@ private:
 */
 ////////////////////////////////////////////////////////////////////////////////////////
 
-struct Color : D3DXCOLOR
+struct Color : FrankColorBase
 {
-	Color() 
+	Color()
 	{
 		#ifdef DEBUG
 			// init to bad values in debug
 			r = g = b = a = NAN;
 		#endif
 	}
-	Color( FLOAT r, FLOAT g, FLOAT b, FLOAT a = 1 ) : D3DXCOLOR(r, g, b, a ) {}
-	Color( const D3DXCOLOR& c ) : D3DXCOLOR(c) {}
-	Color( const b2Color& c) : D3DXCOLOR(c.r, c.g, c.b, c.a) {}
-	
+	Color( FLOAT r, FLOAT g, FLOAT b, FLOAT a = 1 ) : FrankColorBase(r, g, b, a ) {}
+	Color( const FrankColorBase& c ) : FrankColorBase(c) {}
+	Color( const b2Color& c) : FrankColorBase(c.r, c.g, c.b, c.a) {}
+	#ifndef FRANK_PLATFORM_WEB
+	Color( const D3DXCOLOR& c ) : FrankColorBase(c.r, c.g, c.b, c.a) {}
+	operator D3DXCOLOR () const { return D3DXCOLOR(r, g, b, a); }
+	operator D3DXVECTOR4 () const { return D3DXVECTOR4(r, g, b, a); }
+	#else
+	// web D3DXVECTOR4 stand-in lives in frankPlatformWeb.h
+	operator D3DXVECTOR4 () const { return D3DXVECTOR4(r, g, b, a); }
+	#endif
+
 	operator DWORD () const
 	{
 		ASSERT(IsFinite());
-		return (D3DXCOLOR)(*this);
+		return ToDWORD();
 	}
 	const Color CapValues() const;
 	const Color HSVtoRGB() const;
@@ -475,7 +505,8 @@ struct Vector2
 	static inline const Vector2 BuildRandomInBox(const Box2AABB& box);
 	static inline const Vector2 BuildRandomInCircle(float radius = 1, float minRadius = 0);
 	static inline const Vector2 BuildGaussian(const Vector2& variance = Vector2(1), const Vector2& mean = Vector2(0));
-	const D3DXVECTOR3 GetD3DXVECTOR3(float z = 0) const;
+	const FrankVec3Base GetVec3Base(float z = 0) const;
+	const D3DXVECTOR3 GetD3DXVECTOR3(float z = 0) const;	// web stand-in exists since phase 5
 
 	void RenderDebug(const Color& color = Color::White(0.5f), float radius = 0.1f, float time = 0.0f) const;
 
@@ -712,11 +743,15 @@ struct IntVector2
 */
 ////////////////////////////////////////////////////////////////////////////////////////
 
-struct Vector3 : public D3DXVECTOR3
+struct Vector3 : public FrankVec3Base
 {
 	// constructors to make the vector3
 	Vector3() {}
-	Vector3(const D3DXVECTOR3& v);
+	Vector3(const FrankVec3Base& v);
+	#ifndef FRANK_PLATFORM_WEB
+	Vector3(const D3DXVECTOR3& v) : FrankVec3Base(v.x, v.y, v.z) {}
+	operator D3DXVECTOR3 () const { return D3DXVECTOR3(x, y, z); }
+	#endif
 	Vector3(float _x, float _y, float _z);
 	explicit Vector3(float _v) ;
 	Vector3(const Vector2& v);
@@ -824,7 +859,10 @@ struct Matrix44
 {
 	Matrix44() {}
 	Matrix44(const Matrix44& m)  : matrix(m.matrix) {}
-	Matrix44(const D3DMATRIX& m)  : matrix(m) {}
+	Matrix44(const FrankMat44Base& m)  : matrix(m) {}
+	#ifndef FRANK_PLATFORM_WEB
+	Matrix44(const D3DMATRIX& m)  { matrix = reinterpret_cast<const FrankMat44Base&>(m); }
+	#endif
 	explicit Matrix44(const XForm2& xf, float z = 0);
 	explicit Matrix44(const Vector2& v);
 	explicit Matrix44(const Quaternion& q);
@@ -872,6 +910,7 @@ struct Matrix44
 	static const Matrix44 BuildTranslate(float x, float y, float z);
 	static const Matrix44 BuildTranslate(const Vector3& v);
 	static const Matrix44 BuildLookAtLH(const Vector3& pos, const Vector3& at, const Vector3& up);
+	static const Matrix44 BuildOrthoLH(float width, float height, float zNear, float zFar);
 
 	const Vector3 TransformCoord(const Vector3& v) const;
 	const Vector3 TransformNormal(const Vector3& v) const;
@@ -894,8 +933,18 @@ struct Matrix44
 	float GetAngleZ() const;
 	void GetYawPitchRoll(Vector3& rotation) const;
 
-	D3DXMATRIX& GetD3DXMatrix()				{ return matrix; }
-	const D3DXMATRIX& GetD3DXMatrix() const { return matrix; }
+	FrankMat44Base& GetMatrixBase()				{ return matrix; }
+	const FrankMat44Base& GetMatrixBase() const	{ return matrix; }
+	#ifndef FRANK_PLATFORM_WEB
+	// D3DX interop for the Windows renderer - layout-identical cast, no copies
+	D3DXMATRIX& GetD3DXMatrix()				{ return reinterpret_cast<D3DXMATRIX&>(matrix); }
+	const D3DXMATRIX& GetD3DXMatrix() const { return reinterpret_cast<const D3DXMATRIX&>(matrix); }
+	#else
+	// web alias so shared-header inline code like SetTransform(..., &m.GetD3DXMatrix())
+	// parses; the fake device ignores the pointer
+	FrankMat44Base& GetD3DXMatrix()				{ return matrix; }
+	const FrankMat44Base& GetD3DXMatrix() const	{ return matrix; }
+	#endif
 
 	///////////////////////////////////////
     // Class Statics
@@ -909,7 +958,7 @@ private:
     // Data
 	///////////////////////////////////////
 
-	D3DXMATRIX matrix;
+	FrankMat44Base matrix;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -921,14 +970,20 @@ private:
 struct Quaternion
 {
 	Quaternion();
-	Quaternion(const D3DXQUATERNION& q);
+	Quaternion(const FrankQuatBase& q);
 	Quaternion(const Matrix44& m);
 	Quaternion(const Vector3& rotation);
 	Quaternion(const Vector3& axis, float angle);
 	Quaternion(float x, float y, float z, float w);
 
-	D3DXQUATERNION& GetD3DXQuaternion();
-	const D3DXQUATERNION& GetD3DXQuaternion() const;
+	FrankQuatBase& GetQuaternionBase()				{ return quaternion; }
+	const FrankQuatBase& GetQuaternionBase() const	{ return quaternion; }
+	#ifndef FRANK_PLATFORM_WEB
+	// D3DX interop - layout-identical cast, no copies
+	Quaternion(const D3DXQUATERNION& q);
+	D3DXQUATERNION& GetD3DXQuaternion()				{ return reinterpret_cast<D3DXQUATERNION&>(quaternion); }
+	const D3DXQUATERNION& GetD3DXQuaternion() const	{ return reinterpret_cast<const D3DXQUATERNION&>(quaternion); }
+	#endif
 
 	///////////////////////////////////////
     // Assignment Operators
@@ -967,8 +1022,16 @@ struct Quaternion
 
 private:
 
-	D3DXQUATERNION quaternion;
+	FrankQuatBase quaternion;
 };
+
+#ifndef FRANK_PLATFORM_WEB
+// the renderer interop casts above depend on identical layout
+static_assert(sizeof(FrankColorBase) == sizeof(D3DXCOLOR), "FrankColorBase must match D3DXCOLOR layout");
+static_assert(sizeof(FrankVec3Base) == sizeof(D3DXVECTOR3), "FrankVec3Base must match D3DXVECTOR3 layout");
+static_assert(sizeof(FrankMat44Base) == sizeof(D3DXMATRIX), "FrankMat44Base must match D3DXMATRIX layout");
+static_assert(sizeof(FrankQuatBase) == sizeof(D3DXQUATERNION), "FrankQuatBase must match D3DXQUATERNION layout");
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////////////
 /*

@@ -22,26 +22,27 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 
 // use this macro to add console commands for variables
-#define ConsoleCommand(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L#name);
-#define ConsoleCommandPinned(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L#name, true, false);
-#define ConsoleCommandHidden(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L#name, false, true);
-#define ConsoleCommandPinnedHidden(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L#name, true, true);
+// (L"" #name widens the stringized name portably; MSVC's L#name paste is non-standard)
+#define ConsoleCommand(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L"" #name);
+#define ConsoleCommandPinned(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L"" #name, true, false);
+#define ConsoleCommandHidden(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L"" #name, false, true);
+#define ConsoleCommandPinnedHidden(variable, name) static DebugConsole::Command _##name##_CONSOLE_COMMAND(variable, L"" #name, true, true);
 
 #define ConsoleCommandSimple(theType, variable, value)	\
 static theType variable = value;						\
-static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L#variable);
+static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L"" #variable);
 
 #define ConsoleCommandSimplePinned(theType, variable, value)	\
 static theType variable = value;								\
-static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L#variable, true, false);
+static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L"" #variable, true, false);
 
 #define ConsoleCommandSimpleHidden(theType, variable, value)	\
 static theType variable = value;								\
-static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L#variable, false, true);
+static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L"" #variable, false, true);
 
 #define ConsoleCommandSimplePinnedHidden(theType, variable, value)	\
 static theType variable = value;								\
-static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L#variable, true, true);
+static DebugConsole::Command _##variable##_CONSOLE_COMMAND(variable, L"" #variable, true, true);
 
 // shortcut for function style commands
 #define ConsoleFunction(name)									\

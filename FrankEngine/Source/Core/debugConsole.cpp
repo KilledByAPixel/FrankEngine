@@ -91,7 +91,7 @@ void DebugConsole::Save() const
 		return;
 
 	{
-		ofstream outFile(consoleMemoryFilename);
+		ofstream outFile(FRANK_FILENAME(consoleMemoryFilename));
 		if (outFile.fail())
 		{
 			outFile.close();
@@ -114,7 +114,7 @@ void DebugConsole::Save() const
 	}
 	if (!hasBeenGliched)
 	{
-		ofstream outFile(consolePinnedFilename);
+		ofstream outFile(FRANK_FILENAME(consolePinnedFilename));
 
 		if (outFile.fail())
 		{
@@ -143,7 +143,7 @@ void DebugConsole::Load()
 {
 	{
 		// load line memory
-		ifstream inFile(consoleMemoryFilename);
+		ifstream inFile(FRANK_FILENAME(consoleMemoryFilename));
 		while (!inFile.eof() && !inFile.fail())
 		{
 			char buffer[1024];
@@ -162,7 +162,7 @@ void DebugConsole::Load()
 	}
 	{
 		// load pinned commands
-		ifstream inFile(consolePinnedFilename);
+		ifstream inFile(FRANK_FILENAME(consolePinnedFilename));
 		while (!inFile.eof() && !inFile.fail())
 		{
 			char buffer[1024];
@@ -927,7 +927,7 @@ void DebugConsole::OnKeyboard(UINT nChar)
 
 void DebugConsole::ParseFile(const wstring& filename, bool showFileNotFound)
 {		
-	ifstream inFile(filename);
+	ifstream inFile(FRANK_FILENAME(filename));
 	
 	if (inFile.fail())
 	{
@@ -1000,7 +1000,7 @@ void DebugConsole::UnpinAll()
 
 void DebugConsole::SaveLog(const wstring& filename) const
 {
-	ofstream outFile(filename);
+	ofstream outFile(FRANK_FILENAME(filename));
 	if (!outFile.fail())
 	{
 		for (const ConsoleLine& consoleLine : linesLog)
@@ -1260,7 +1260,7 @@ void DebugConsole::UpdateSkiGame()
 	static int wallPos, gapSize, direction, lineCount, playerPos, sizeDirection;
 	static queue<pair<int, int>> wallsQueue;
 	const int width = 180;
-	const wstring playerString[3] = { L"/°/", L"l°l", L"\\°\\" };
+	const wstring playerString[3] = { L"/\xB0/", L"l\xB0l", L"\\\xB0\\" };
 	const int playerOffset = 8;
 
 	if (startSkiGame)
@@ -1292,7 +1292,7 @@ void DebugConsole::UpdateSkiGame()
 	wstringstream buffer;
 	int cursorPos = 0;
 	for (int i = 0; i < wallPos; ++i, ++cursorPos)
-		buffer << (RAND_DIE(500) ? L"^" : L"·");
+		buffer << (RAND_DIE(500) ? L"^" : L"\xB7");
 	buffer << L"O";
 	for (int i = 0; i < gapSize; ++i, ++cursorPos)
 		buffer << L" ";
@@ -1301,7 +1301,7 @@ void DebugConsole::UpdateSkiGame()
 		buffer << L" " << lineCount << L" "; 
 
 	while (buffer.str().length() <= unsigned(width+10))
-		buffer << (RAND_DIE(500)? L"^" : L"·");
+		buffer << (RAND_DIE(500)? L"^" : L"\xB7");
 	buffer << L"\n";
 	if (lineCount == skiHighScore)
 		AddLine(buffer.str(), CONSOLE_COLOR_SUCCESS);

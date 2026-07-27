@@ -14,12 +14,16 @@
 	the device windowed as far as directx is concerned, so switching is just a window
 	resize and the display mode is never touched.
 
-	To the player this is a two state toggle, Window and Full Screen. Which one
-	"Full Screen" means is decided at launch: normally it is Borderless, but passing
-	-exclusivefullscreen (or -exclusive) on the command line makes it the old
-	exclusive mode instead, for anyone who needs it for capture or latency reasons.
-	Do not use dxut's own -fullscreen or -windowed flags, they override the device
-	underneath this class and leave the mode here stale.
+	THE PLAYER ONLY EVER SEES TWO MODES. Three exist internally, but exactly one of
+	them is the "full screen" of any given run, chosen by GetFullscreenMode():
+	borderless normally, or exclusive fullscreen when launched with
+	-exclusivefullscreen (alias -exclusive). So the toggle is always
+	windowed <-> one fullscreen mode, never a three way cycle.
+
+	GetModeName names whichever mode is actually in use - "Window Mode",
+	"Borderless Mode" or "Full Screen Mode" - so the button tells the player what they
+	really have. The web build has no borderless mode at all (the browser only offers
+	real fullscreen), so it shows only Window Mode and Full Screen Mode.
 
 	IMPORTANT: do not use DXUTIsWindowed() to test for fullscreen anymore. In borderless
 	mode the device really is windowed, so that check returns true even though the window
@@ -46,14 +50,12 @@ public:
 	// change the window mode, does nothing if already in that mode
 	static void SetMode(WindowDisplayMode newMode);
 
-	// toggles between windowed and whatever fullscreen means this run
+	// toggle windowed <-> whichever fullscreen mode this run uses
 	static void CycleMode();
 
-	// go windowed or fullscreen without caring which fullscreen mode is active
-	static void SetFullscreen(bool fullscreen);
-
-	// true if launched with -exclusivefullscreen
-	static bool IsExclusiveFullscreenAllowed() { return allowExclusiveFullscreen; }
+	// the fullscreen mode for this run: exclusive only when the command line asked
+	// for it, borderless otherwise. fixed at startup, so the toggle is stable
+	static WindowDisplayMode GetFullscreenMode();
 
 	// display name for a mode, for gui buttons
 	static const WCHAR* GetModeName() { return GetModeName(mode); }
@@ -79,11 +81,7 @@ private:
 	static void ApplyBorderless();
 	static void RestoreWindowed();
 
-	// which mode the "Full Screen" option maps to this run
-	static WindowDisplayMode GetFullscreenMode();
-
 	static WindowDisplayMode mode;
-	static bool allowExclusiveFullscreen;
 
 	// window placement to restore when leaving borderless
 	static RECT windowedRect;

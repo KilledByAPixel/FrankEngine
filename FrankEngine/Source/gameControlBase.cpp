@@ -19,9 +19,6 @@ Terrain*			g_terrain	= NULL;
 bool GameControlBase::showDebugInfo = false;
 ConsoleCommand(GameControlBase::showDebugInfo, debugInfoEnable);
 
-// textures and sounds are loaded once rather than per device reset
-static bool assetsLoaded = false;
-
 bool GameControlBase::autoSaveTerrain = true;
 ConsoleCommand(GameControlBase::autoSaveTerrain, autoSaveTerrain);
 
@@ -499,7 +496,6 @@ void GameControlBase::UpdateFrameInternal(float delta)
 	{
 		g_render->ReloadModifiedTextures();
 		DestroyDeviceObjects();
-		ReleaseAssets();
 		InitDeviceObjects();
 		g_debugMessageSystem.AddFormatted(L"Resources refreshed");
 	}
@@ -753,15 +749,9 @@ void GameControlBase::InitDeviceObjects()
 	DeferredRender::InitDeviceObjects();
 	FrankFont::InitDeviceObjects();
 
-	// load assets once, not on every device reset
-	// sounds are directsound buffers and are not affected by a d3d reset at all,
-	// and textures are managed pool so directx restores them by itself
-	if (!assetsLoaded)
-	{
-		assetsLoaded = true;
-		LoadSounds();
-		LoadTextures();
-	}
+	// load assets
+	LoadSounds();
+	LoadTextures();
 
 	// setup input
 	static bool inputWasSetup = false;
@@ -775,23 +765,12 @@ void GameControlBase::InitDeviceObjects()
 		GetMiniMap()->InitDeviceObjects();
 }
 
-// unloads textures and sounds so the next InitDeviceObjects() reloads them
-void GameControlBase::ReleaseAssets()
-{
-	if (g_render)
-		g_render->ReleaseTextures();
-	if (g_sound)
-		g_sound->ReleaseSounds();
-	assetsLoaded = false;
-}
-
 void GameControlBase::DestroyDeviceObjects()
 {
 	if (g_render)
 		g_render->DestroyDeviceObjects();
-	
-	// note: sounds and textures are deliberately not released here,
-	// this runs on every device reset. see ReleaseAssets().
+	if (g_sound)
+		g_sound->ReleaseSounds();
 	g_debugRender.DestroyDeviceObjects();
 	g_terrainRender.DestroyDeviceObjects();
 	DeferredRender::DestroyDeviceObjects();
@@ -969,7 +948,7 @@ void GameControlBase::RenderDebugText()
 				}
 
 				if (IsGameplayMode())
-					g_textHelper->DrawFormattedTextLine( L"speed: %.2f, %.2f°", GetPlayer()->GetSpeed(), GetPlayer()->GetAngularVelocity() );
+					g_textHelper->DrawFormattedTextLine( L"speed: %.2f, %.2f\xB0", GetPlayer()->GetSpeed(), GetPlayer()->GetAngularVelocity() );
 			}
 		}
 

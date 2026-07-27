@@ -33,6 +33,8 @@ ConsoleCommand(SoundControl::dopplerDistanceFactor, soundDopplerDistanceFactor);
 bool SoundControl::enableTimeScale = true;
 ConsoleCommand(SoundControl::enableTimeScale, soundEnableTimeScale);
 
+bool SoundControl::appHasFocus = true;
+
 bool SoundControl::cameraIsListener = true;
 ConsoleCommand(SoundControl::cameraIsListener, soundCameraIsListener);
 
@@ -378,8 +380,8 @@ void SoundControl::UpdateTimeScale(float timeScale)
 	if (!soundManager || !hasPlayedSound)
 		return;
 	
-	if (g_gameControlBase->IsPaused())
-		timeScale = 0.0f;
+	if (g_gameControlBase->IsPaused() || !appHasFocus)
+		timeScale = 0.0f;	// background window/tab freezes sounds the same way pause does
 	else if (!enableTimeScale)
 		timeScale = 1.0f;
 

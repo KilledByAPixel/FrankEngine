@@ -20,27 +20,8 @@ WindowDisplayMode WindowControl::mode = WindowDisplayMode::Borderless;
 RECT WindowControl::windowedRect = { 0, 0, 0, 0 };
 LONG WindowControl::windowedStyle = 0;
 bool WindowControl::hasSavedPlacement = false;
-bool WindowControl::allowExclusiveFullscreen = false;
 
 static const char* windowStateFilename = "windowState.cfg";
-
-// case insensitive search of the raw command line, good enough for a launch flag
-static bool HasCommandLineFlag(const WCHAR* flag)
-{
-	const WCHAR* commandLine = GetCommandLineW();
-	if (!commandLine || !flag)
-		return false;
-
-	for (const WCHAR* c = commandLine; *c; ++c)
-	{
-		int i = 0;
-		while (flag[i] && towlower(c[i]) == towlower(flag[i]))
-			++i;
-		if (!flag[i])
-			return true;
-	}
-	return false;
-}
 
 //--------------------------------------------------------------------------------------
 // console commands
@@ -55,36 +36,50 @@ ConsoleFunction(windowMode)
 }
 
 // legacy alias, kept because several games still set this in autoexec.cfg
-// selects whichever fullscreen mode is active this run, normally borderless
+// maps onto whichever fullscreen mode this run uses
 ConsoleFunction(startFullscreen)
 {
 	int wantsFullscreen = 0;
 	swscanf_s(text.c_str(), L"%d", &wantsFullscreen);
-	WindowControl::SetFullscreen(wantsFullscreen != 0);
+	WindowControl::SetMode(wantsFullscreen? WindowControl::GetFullscreenMode() : WindowDisplayMode::Windowed);
+}
+
+//--------------------------------------------------------------------------------------
+
+WindowDisplayMode WindowControl::GetFullscreenMode()
+{
+	// resolved once: the answer must not change mid run, or the toggle would strand
+	// the player between two different fullscreen modes
+	static int fullscreenMode = -1;
+	if (fullscreenMode < 0)
+	{
+		const WCHAR* commandLine = GetCommandLineW();
+		const bool wantsExclusive = commandLine &&
+			(wcsstr(commandLine, L"-exclusivefullscreen") || wcsstr(commandLine, L"-exclusive"));
+		fullscreenMode = int(wantsExclusive ? WindowDisplayMode::Fullscreen : WindowDisplayMode::Borderless);
+	}
+	return WindowDisplayMode(fullscreenMode);
 }
 
 //--------------------------------------------------------------------------------------
 
 const WCHAR* WindowControl::GetModeName(WindowDisplayMode queryMode)
 {
-	// the player only ever sees two options, borderless and exclusive both
-	// present as "Full Screen" since only one of them is reachable per run
-	return (queryMode == WindowDisplayMode::Windowed)? L"Window" : L"Full Screen";
-}
-
-WindowDisplayMode WindowControl::GetFullscreenMode()
-{
-	return allowExclusiveFullscreen? WindowDisplayMode::Fullscreen : WindowDisplayMode::Borderless;
-}
-
-void WindowControl::SetFullscreen(bool fullscreen)
-{
-	SetMode(fullscreen? GetFullscreenMode() : WindowDisplayMode::Windowed);
+	// name the mode the window is actually in. only two of these are ever reachable in
+	// a run (windowed plus GetFullscreenMode), so the player still sees a two way
+	// toggle - it just says which kind of fullscreen this build gave them
+	switch (queryMode)
+	{
+		case WindowDisplayMode::Borderless:	return L"Borderless Mode";
+		case WindowDisplayMode::Fullscreen:	return L"Full Screen Mode";
+		default:							return L"Window Mode";
+	}
 }
 
 void WindowControl::CycleMode()
 {
-	SetFullscreen(mode == WindowDisplayMode::Windowed);
+	// two options only: windowed and this run's fullscreen mode
+	SetMode(mode == WindowDisplayMode::Windowed ? GetFullscreenMode() : WindowDisplayMode::Windowed);
 }
 
 void WindowControl::SetMode(WindowDisplayMode newMode)
@@ -207,26 +202,24 @@ void WindowControl::RestoreWindowed()
 
 void WindowControl::Load()
 {
-	// decide what "Full Screen" means for this run before anything else
-	allowExclusiveFullscreen =
-		HasCommandLineFlag(L"-exclusivefullscreen") || HasCommandLineFlag(L"-exclusive");
-
 	FILE* f = NULL;
-	if (fopen_s(&f, windowStateFilename, "r") == 0 && f)
-	{
-		int savedMode = 0;
-		if (fscanf_s(f, "%d", &savedMode) == 1)
-		{
-			if (savedMode >= 0 && savedMode < int(WindowDisplayMode::Count))
-				mode = WindowDisplayMode(savedMode);
-		}
-		fclose(f);
-	}
+	if (fopen_s(&f, windowStateFilename, "r") != 0 || !f)
+		return;
 
-	// clamp the saved mode onto the two states available this run, so a mode
-	// saved with the flag set does not strand the next launch without it
-	if (mode != WindowDisplayMode::Windowed)
-		mode = GetFullscreenMode();
+	int savedMode = 0;
+	if (fscanf_s(f, "%d", &savedMode) == 1)
+	{
+		// legacy files stored 0 = windowed and 1 = exclusive fullscreen
+		// 1 now means borderless, which is a deliberate upgrade for existing players
+		if (savedMode >= 0 && savedMode < int(WindowDisplayMode::Count))
+		{
+			// any saved fullscreen mode maps onto THIS run's fullscreen mode, so a file
+			// written with -exclusivefullscreen cannot strand the next launch without it
+			mode = (WindowDisplayMode(savedMode) == WindowDisplayMode::Windowed)
+				? WindowDisplayMode::Windowed : GetFullscreenMode();
+		}
+	}
+	fclose(f);
 }
 
 void WindowControl::Save()

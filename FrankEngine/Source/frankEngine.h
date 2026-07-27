@@ -30,13 +30,17 @@
 
 #define FRANK_ENGINE
 #define frankEngineName			(L"Frank Engine")
-#define frankEngineVersion		(L"0.842")
+#define frankEngineVersion		(L"0.843")
 
 // library includes
 #include <string>
 #include <list>
 #include <set>
+#ifdef FRANK_PLATFORM_WEB
+#include "core/frankPlatformWeb.h"
+#else
 #include "../DXUT/core/DXUT.h"
+#endif
 #include "../../Box2D/Box2D/Box2D.h"
 #include "core/frankMath.h"
 using namespace FrankMath;
@@ -53,6 +57,13 @@ extern class Physics*			g_physics;
 extern class EditorGui			g_editorGui;
 extern class CDXUTTextHelper*	g_textHelper;
 #define defaultTerrainFilename	(L"terrain.2dt")
+
+// file streams take wide filenames on windows; libc++ (web) needs narrow paths
+#ifdef FRANK_PLATFORM_WEB
+#define FRANK_FILENAME(name) FrankTempNarrow(name)
+#else
+#define FRANK_FILENAME(name) (name)
+#endif
 
 // render setting globals
 extern float g_aspectRatio;
@@ -79,9 +90,25 @@ void FrankEngineLoop();
 void FrankEngineShutdown();
 
 // frank engine global types
+// (web/clang requires a fixed underlying type to forward-declare enums; MSVC's
+// extension allows the plain form, which stays untouched for the Windows build)
+#ifdef FRANK_PLATFORM_WEB
+enum GameTeam : int;
+enum PhysicsGroup : int;
+enum GameDamageType : int;
+enum GameObjectType : int;
+enum TextureID : int;
+enum SoundID : int;
+enum GameMaterialIndex : int;
+#else
 enum GameTeam;
 enum PhysicsGroup;
 enum GameDamageType;
+enum GameObjectType;
+enum TextureID;
+enum SoundID;
+enum GameMaterialIndex;
+#endif
 const GameDamageType GameDamageType_Default = GameDamageType(0);
 
 // all game engine header files are included here for the precompiled header
@@ -91,7 +118,9 @@ const GameDamageType GameDamageType_Default = GameDamageType(0);
 #include "core/perlinNoise.h"
 #include "core/debugConsole.h"
 #include "core/pathFindingBase.h"
+#ifndef FRANK_PLATFORM_WEB
 #include "core/windowMode.h"
+#endif
 #include "objects/gameObject.h"
 #include "objects/camera.h"
 #include "gameControlBase.h"
@@ -101,10 +130,15 @@ const GameDamageType GameDamageType_Default = GameDamageType(0);
 #include "rendering/deferredRender.h"
 #include "rendering/miniMap.h"
 #include "gui/guiBase.h"
+#ifndef FRANK_PLATFORM_WEB
 #include "gui/editorGui.h"
 #include "editor/objectEditor.h"
 #include "editor/tileEditor.h"
 #include "editor/editor.h"
+#else
+// the editor headers pull this in early on windows; actor/basicObjects need GameObjectStub complete
+#include "objects/gameObjectBuilder.h"
+#endif
 #include "objects/actor.h"
 #include "objects/basicObjects.h"
 #include "objects/gameObjectBuilder.h"

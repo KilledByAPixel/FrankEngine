@@ -27,7 +27,6 @@ ID3DXFont*						g_pFont9 = NULL;				// font for text helper
 ID3DXSprite*					g_pSprite9 = NULL;				// sprite for text helper
 GameTimer						g_lostFocusTimer;				// how long since we were sleeping
 static bool						g_musicPausedForSizeMove = false;
-static bool						g_musicPausedForDeviceReset = false;
 
 Color	g_backBufferClearColor			= Color::Grey(1, 0.1f);
 ConsoleCommand(g_backBufferClearColor, backBufferClearColor);
@@ -177,14 +176,6 @@ void FrankEngineShutdown()
 		if (GameControlBase::autoSaveTerrain && !g_gameControlBase->IsGameplayMode() && g_terrain)
 			g_terrain->Save(Terrain::terrainFilename);
 		g_gameControlBase->DestroyDeviceObjects();
-
-		// assets have to be released here, not left to OnD3D9DestroyDevice.
-		// dxut destroys the device from its static state destructor, which runs
-		// after wWinMain returns, by which point g_gameControlBase is gone and
-		// the callback would skip the release. that leaves textures holding
-		// references and directx reports a non-zero device reference count.
-		g_gameControlBase->ReleaseAssets();
-
 		delete g_gameControlBase;
 		g_gameControlBase = NULL;
 	}
@@ -326,16 +317,8 @@ HRESULT CALLBACK OnD3D9ResetDevice( IDirect3DDevice9* pd3dDevice,
 		g_gameControlBase->GetInputControl().Clear();
 
 		// reset the gui
-		g_guiBase->OnResetDevice();
-		g_editorGui.OnResetDevice();
-	}
-
-	// resume music now that everything has been rebuilt
-	if (g_musicPausedForDeviceReset)
-	{
-		g_musicPausedForDeviceReset = false;
-		if (g_sound)
-			g_sound->GetMusicPlayer().Pause(false);
+		g_guiBase->OnResetDevice(); 
+		g_editorGui.OnResetDevice(); 
 	}
 
     return S_OK;
@@ -347,13 +330,6 @@ HRESULT CALLBACK OnD3D9ResetDevice( IDirect3DDevice9* pd3dDevice,
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D9LostDevice( void* pUserContext )
 {
-	// pause music across the reset. the stream keeps looping over its buffer
-	// while everything is being torn down and rebuilt, which sounds terrible.
-	// checking IsPaused() first means this composes with the size move pause.
-	g_musicPausedForDeviceReset = g_sound && !g_sound->GetMusicPlayer().IsPaused();
-	if (g_musicPausedForDeviceReset)
-		g_sound->GetMusicPlayer().Pause(true);
-
     g_dialogResourceManager.OnD3D9LostDevice();
     if( g_pFont9 ) g_pFont9->OnLostDevice();
     SAFE_RELEASE( g_pSprite9 );
@@ -373,15 +349,7 @@ void CALLBACK OnD3D9LostDevice( void* pUserContext )
 void CALLBACK OnD3D9DestroyDevice( void* pUserContext )
 {
 	if (g_gameControlBase)
-	{
 		g_gameControlBase->DestroyDeviceObjects();
-
-		// the device is going away for real here, not just being reset, so the
-		// textures and sounds we normally hold onto have to be unloaded too
-		// this also covers dxut recreating the device when the window moves to
-		// a different adapter, the next InitDeviceObjects() reloads everything
-		g_gameControlBase->ReleaseAssets();
-	}
 
 	ASSERT(g_render);
 	SAFE_DELETE(g_render);
@@ -409,7 +377,14 @@ void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext 
 	if (GetFocus() != DXUTGetHWND())
 	{
 		if (!lostFocus)
+		{
 			g_input->ClearRumble();
+
+			// freeze looping sounds along with the music while backgrounded
+			SoundControl::appHasFocus = false;
+			if (g_sound)
+				g_sound->UpdateTimeScale(0);
+		}
 
 		lostFocus = true;
 		g_lostFocusTimer.Set();
@@ -427,6 +402,7 @@ void CALLBACK OnFrameMove( double fTime, float fElapsedTime, void* pUserContext 
 	}
 	else if (lostFocus)
 	{
+		SoundControl::appHasFocus = true;
 		g_lostFocusTimer.Unset();
 		if (g_gameControlBase)
 		{

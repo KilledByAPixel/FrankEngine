@@ -56,7 +56,11 @@ enum GamepadButtons
 };
 
 // hack because we want some game buttons accessable in the editor
+#ifdef FRANK_PLATFORM_WEB
+enum GameButtonIndex : int;
+#else
 enum GameButtonIndex;
+#endif
 const GameButtonIndex GB_Invalid				= GameButtonIndex(0);
 const GameButtonIndex GB_MouseLeft				= GameButtonIndex(1);
 const GameButtonIndex GB_MouseMiddle			= GameButtonIndex(2);

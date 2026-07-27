@@ -130,7 +130,7 @@ void Camera::UpdateProjectionMatrix(float zoom)
     // Set the projection matrix
 	const float height = zoom * GetAspectFix();
 	const float width = height * aspectRatio;
-	D3DXMatrixOrthoLH( &matrixProjection.GetD3DXMatrix(), width, height, nearClip, farClip );
+	matrixProjection = Matrix44::BuildOrthoLH( width, height, nearClip, farClip );
 }
 
 void Camera::PrepForUpdate()

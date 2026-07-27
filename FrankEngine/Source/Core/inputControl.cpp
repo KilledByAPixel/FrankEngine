@@ -7,7 +7,9 @@
 
 #include "frankEngine.h"
 
+#ifndef FRANK_PLATFORM_WEB
 #include <Xinput.h>
+#endif
 #include "core/debugConsole.h"
 
 static const int gamepadMaxCount = 4;
@@ -374,7 +376,7 @@ void InputControl::SetMousePosScreenSpace(const Vector2& mousePos)
 void InputControl::SetMousePosWorldSpace(const Vector2& mousePosWorldSpace)
 {
 	const Vector2 mousePosLocalSpace = cameraXF.GetInterpolated().Inverse().TransformCoord(mousePosWorldSpace);
-    const D3DXMATRIX matrixProjectionD3D = matrixProjection.GetInterpolated().GetD3DXMatrix();
+    const FrankMat44Base matrixProjectionD3D = matrixProjection.GetInterpolated().GetMatrixBase();
 	const Vector2 mousePosScreenSpace
 	(
 		(mousePosLocalSpace.x * matrixProjectionD3D._11 + 1) * g_backBufferWidth / 2.0f,
@@ -482,7 +484,7 @@ Vector2 InputControl::GetMousePosLocalSpace() const
 
     // store the curser point and projection matrix
     const Vector2& mousePos = mouseInput.pos;
-    const D3DXMATRIX matrixProjectionD3D = matrixProjection.GetInterpolated().GetD3DXMatrix();
+    const FrankMat44Base matrixProjectionD3D = matrixProjection.GetInterpolated().GetMatrixBase();
 
     // compute the vector of the pick ray in local space
     Vector2 mousePosLocalSpace
@@ -500,7 +502,7 @@ Vector2 InputControl::GetLastMousePosLocalSpace() const
 
     // store the curser point and projection matrix
     const Vector2& mousePos = mouseInput.posLast;
-    const D3DXMATRIX matrixProjectionD3D = matrixProjection.GetInterpolated().GetD3DXMatrix();
+    const FrankMat44Base matrixProjectionD3D = matrixProjection.GetInterpolated().GetMatrixBase();
 
     // compute the vector of the pick ray in screen space
     Vector2 mousePosLocalSpace

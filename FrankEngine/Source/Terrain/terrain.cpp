@@ -339,7 +339,7 @@ void Terrain::Convert()
 
 bool Terrain::Save(const WCHAR* filename)
 {
-	ofstream outTerrainFile(filename, ios::out | ios::binary);
+	ofstream outTerrainFile(FRANK_FILENAME(filename), ios::out | ios::binary);
 	if (outTerrainFile.fail())
 		return false;
 
@@ -408,7 +408,7 @@ bool Terrain::Load(const WCHAR* filename)
 	wasReset = true;
 	g_editor.ResetEditor();
 
-	ifstream inTerrainFile(filename, ios::in | ios::binary);
+	ifstream inTerrainFile(FRANK_FILENAME(filename), ios::in | ios::binary);
 
 	if (inTerrainFile.fail())
 		return LoadFromResource(filename);
