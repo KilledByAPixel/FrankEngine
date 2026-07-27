@@ -427,8 +427,36 @@ static EM_BOOL WebOnMouse(int eventType, const EmscriptenMouseEvent* e, void* us
 	return EM_TRUE;
 }
 
+// Release everything currently held. The browser only delivers a keyup/mouseup to a
+// window that still has focus, so alt-tabbing (or clicking off the canvas) while a
+// button is down means the up event never arrives and the game sees it held forever -
+// the player comes back to a stuck input until they press and release it again.
+// Windows has the same hazard and handles it on WM_KILLFOCUS; this is the web version.
+static void WebReleaseHeldInput()
+{
+	if (!g_input)
+		return;
+	for (UINT key = 0; key < KEYBOARD_INPUT_SIZE; ++key)
+	{
+		if (g_input->IsKeyDown(key))
+			g_input->OnKeyboard(key, false, false, NULL);
+	}
+	g_input->OnMouseMessage(WM_LBUTTONUP, 0);
+	g_input->OnMouseMessage(WM_RBUTTONUP, 0);
+	g_input->OnMouseMessage(WM_MBUTTONUP, 0);
+	FrankWebGetMouseLeftDown() = false;	// gui click tracking
+}
+
+static EM_BOOL WebOnBlur(int eventType, const EmscriptenFocusEvent* e, void* userData)
+{
+	WebReleaseHeldInput();
+	return EM_FALSE;	// don't swallow it; the page may want focus handling too
+}
+
 static EM_BOOL WebOnVisibilityChange(int eventType, const EmscriptenVisibilityChangeEvent* e, void* userData)
 {
+	if (e->hidden)
+		WebReleaseHeldInput();	// tabbing away mid-press never delivers the keyup
 	// rAF stops while the tab is hidden, so the frame loop can't apply this -
 	// freeze/unfreeze all sounds synchronously from the event (same path as pause)
 	SoundControl::appHasFocus = !e->hidden;
@@ -454,10 +482,16 @@ void FrankEngineLoop()
 	emscripten_set_keydown_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, WebOnKey);
 	emscripten_set_keyup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, WebOnKey);
 	emscripten_set_mousedown_callback("#canvas", NULL, EM_TRUE, WebOnMouse);
-	emscripten_set_mouseup_callback("#canvas", NULL, EM_TRUE, WebOnMouse);
+	// mouseUP goes on the WINDOW, not the canvas: press on the canvas and release
+	// anywhere else and the canvas never sees the release, so the button sticks down.
+	// mousedown stays canvas-only so clicks on the page around the game are not eaten.
+	emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, WebOnMouse);
 	emscripten_set_mousemove_callback("#canvas", NULL, EM_TRUE, WebOnMouse);
 	emscripten_set_wheel_callback("#canvas", NULL, EM_TRUE, WebOnWheel);
 	emscripten_set_visibilitychange_callback(NULL, EM_TRUE, WebOnVisibilityChange);
+	// focus can leave for reasons visibilitychange never reports: alt-tab to another
+	// window, clicking the page outside the canvas, or an iframe host taking focus
+	emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, WebOnBlur);
 
 	webLastTime = emscripten_get_now() / 1000.0;
 	emscripten_set_main_loop(FrankEngineWebFrame, 0, 1);

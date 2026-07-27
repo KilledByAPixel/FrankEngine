@@ -1409,11 +1409,47 @@ static void WebResetBlendCache()
 // flushes per frame. The terrain cache and the sprite batcher cut the draw count ~3.7x,
 // so N had to come down with it or the mitigation would quietly weaken to ~2 flushes a
 // frame. 25 keeps the flush CADENCE where it was measured, not the divisor.
+// LEFT ON, unlike the other mitigations, because turning it off measured WORSE here:
+// 3 runs at ~36% cpu with it off against ~29% with it on, same 60fps either way. The
+// theory says a mid-frame flush should be pure cost, and on a TILE-BASED gpu (every
+// ipad, every apple silicon mac) it should be actively bad - it forces the tiler to
+// resolve what it has accumulated, splitting one tile pass into several. But that is
+// theory about hardware we cannot measure, against a measurement we can, so it stays
+// until the apple-side research says otherwise. See local/mac-ios-webgl-perf-brief.md.
 ConsoleCommandSimple(int, webFlushEveryDraws, 25);
+
+// Apple gpus (every ipad, every apple silicon mac, through safari or chrome) are
+// TILE-BASED: a mid-frame flush forces the tiler to resolve what it has accumulated,
+// which can split one tile pass into several. That is a much worse deal than on an
+// immediate-mode desktop gpu, where measuring here showed the flush was mildly
+// POSITIVE - so the flush stays on everywhere except the hardware the theory says it
+// hurts, rather than being removed globally on theory alone. Unverified on real apple
+// hardware; see local/mac-ios-webgl-perf-brief.md.
+static bool WebGpuIsTileBased()
+{
+	static int isTiled = -1;
+	if (isTiled < 0)
+	{
+		// NOT glGetString(GL_RENDERER): browsers mask that for fingerprinting (it comes
+		// back as "WebKit WebGL"), and the real string needs WEBGL_debug_renderer_info,
+		// which is itself being restricted. The platform is what we actually care about
+		// anyway - every current apple device is tile-based.
+		isTiled = EM_ASM_INT({
+			var n = navigator;
+			if (/iPad|iPhone|iPod/.test(n.platform || "")) return 1;
+			// ipadOS 13+ reports itself as a mac; touch points give it away
+			if (/Mac/.test(n.platform || "") && (n.maxTouchPoints || 0) > 1) return 1;
+			if (/Mac/.test(n.platform || "")) return 1;	// apple silicon; intel macs cost nothing here
+			return 0;
+		});
+		printf("webRender: %s\n", isTiled ? "apple/tile-based gpu - skipping mid-frame flushes" : "immediate-mode gpu");
+	}
+	return isTiled > 0;
+}
 
 static void WebCountDrawForFlush()
 {
-	if (webFlushEveryDraws <= 0)
+	if (webFlushEveryDraws <= 0 || WebGpuIsTileBased())
 		return;
 	if (++webDrawsSinceFlush >= webFlushEveryDraws)
 	{
