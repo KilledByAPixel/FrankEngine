@@ -1669,13 +1669,20 @@ void WebFlickerProbeShadowFinal(LPDIRECT3DTEXTURE9 texture)
 // map in the SAME frame, before the lights sample it - so RenderShadowMap re-renders
 // the pass when this returns true. proven safe to call repeatedly: each call compares
 // the latest strip read against last frame's.
-ConsoleCommandSimple(bool, webShadowRetry, true);
+// off by default: this is driven by the probe's strip readbacks, so it cannot do
+// anything while webShadowProbe is off (its guard tests both), and the bug it retried
+// around is fixed
+ConsoleCommandSimple(bool, webShadowRetry, false);
 int webShadowRetryCount = 0;
 
-// render the shadow pass twice every frame (union, no clear between): dropped work
-// windows kill ADJACENT commands together, but a second full pass lands hundreds of
-// commands later in a different window. cheap (~16k verts). CONFIRMED effective live.
-int webShadowRender2 = 1;
+// Render the shadow pass twice every frame (union, no clear between): dropped work
+// windows kill ADJACENT commands together, so a second full pass lands hundreds of
+// commands later in a different window. This was effective against the dropped-draw
+// flicker, but it is another MITIGATION rather than the fix (WebUseRGB8Targets is), and
+// it costs a whole extra scene pass every frame - cpu to submit and gpu to rasterize,
+// on every platform. Off by default now; re-enable from the console if shadow flicker
+// ever comes back.
+int webShadowRender2 = 0;
 ConsoleCommand(webShadowRender2, webShadowRender2);
 
 // during the second pass only TERRAIN is drawn: opaque terrain is idempotent, but
