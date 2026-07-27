@@ -818,6 +818,10 @@ void GameControlBase::SetupInput()
 	// engine controls
 	g_input->SetButton(GB_InfoDisplay,		VK_F1);
 	g_input->SetButton(GB_PhysicsDebug,		VK_F2);
+#ifndef FRANK_PLATFORM_WEB
+	// The web build has no editor compiled in, no disk to reload art from, and no
+	// screenshot folder. Leave these unbound rather than let a browser player press
+	// F4 into an edit mode with no ui to get back out of. F1 and F2 still work.
 	g_input->SetButton(GB_RefreshResources,	VK_F3);
 	g_input->SetButton(GB_Editor,			VK_F4);
 	g_input->SetButton(GB_Screenshot,		VK_F5);
@@ -827,6 +831,7 @@ void GameControlBase::SetupInput()
 	g_input->SetButton(GB_ParticleDebug,	VK_F9);
 	g_input->SetButton(GB_SoundDebug,		VK_F10);
 	g_input->SetButton(GB_GamepadDebug,		VK_F11);
+#endif
 
 	// editor controls
 	g_input->SetButton(GB_Editor_MouseDrag,			' ');
