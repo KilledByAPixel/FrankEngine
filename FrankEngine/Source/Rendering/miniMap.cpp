@@ -548,6 +548,21 @@ void MiniMap::RenderTileToTexture(const TerrainTile& tile, const Vector2& tileOf
 {
 	// tile set mode
 	const int surfaceID = (tile.IsClear() || tile.IsAreaClear()) ? 0 : surfaceInfo.GetID();
+
+	if (tileTexture == Texture_Invalid)
+	{
+		// No map tile sheet to sample. GetMinimapTexture() hands back the terrain tile
+		// set's texture, which is Texture_Invalid for a game that never calls
+		// SetTileSetInfo (TestGame, with exampleUseTileSheets = false) - so every tile
+		// drew nothing and the map came out blank while the frame and player marker
+		// still rendered. Fall back to the surface's own colour, mirroring the way
+		// TerrainRender::RenderCached falls back to surfaceInfo.ti when tileSetCount is
+		// 0. A game with a real map sheet is unaffected: this branch cannot be reached.
+		const Color color = (surfaceID == 0) ? Color::Black() : surfaceInfo.color;
+		g_render->RenderQuad(XForm2(tileOffset + Vector2(0.5f)), Vector2(0.5f), color, Texture_Invalid, false);
+		return;
+	}
+
 	const ByteVector2 tileSize(16, 16);
 	const ByteVector2 tilePos(surfaceID % 16, surfaceID / 16);
 	const Color color = Color::White();
