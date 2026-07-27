@@ -43,7 +43,7 @@ extern struct FrankFont*	g_gameFont;
 ////////////////////////////////////////////////////////////////////////////////////////
 // object types
 
-enum GameObjectType
+enum GameObjectType : int
 {
 	GOT_Invalid = 0,
 	GOT_First,
@@ -72,7 +72,7 @@ enum GameObjectType
 ////////////////////////////////////////////////////////////////////////////////////////
 // textures
 
-enum TextureID
+enum TextureID : int
 {
 	// Texture_Invalid
 	Texture_StartGameTextures_ = Texture_StartGameTextures,
@@ -96,7 +96,7 @@ enum TextureID
 ////////////////////////////////////////////////////////////////////////////////////////
 // sounds
 
-enum SoundID
+enum SoundID : int
 {
 	// Sound_Invalid
 	Sound_Test = 1,
@@ -109,7 +109,7 @@ enum SoundID
 ////////////////////////////////////////////////////////////////////////////////////////
 // game buttons
 
-enum GameButtonIndex
+enum GameButtonIndex : int
 {
 	// GB_Invalid
 	GB_Reset = GB_StartGameButtons,
@@ -131,7 +131,7 @@ enum GameButtonIndex
 ////////////////////////////////////////////////////////////////////////////////////////
 // materials
 
-enum GameMaterialIndex
+enum GameMaterialIndex : int
 {
 	// GMI_Invalid
 	GMI_Normal = GMI_Start,
@@ -144,7 +144,7 @@ enum GameMaterialIndex
 ////////////////////////////////////////////////////////////////////////////////////////
 // teams
 
-enum GameTeam
+enum GameTeam : int
 {
 	GameTeam_None = 0,
 	GameTeam_Enemy,
@@ -156,7 +156,7 @@ enum GameTeam
 // object will not collide with others in the same group
 // exept for group 0 which collides with everything
 
-enum PhysicsGroup
+enum PhysicsGroup : int
 {
 	PhysicsGroup_None = 0,
 	PhysicsGroup_Player,
@@ -169,7 +169,7 @@ enum PhysicsGroup
 ////////////////////////////////////////////////////////////////////////////////////////
 // damage types
 
-enum GameDamageType
+enum GameDamageType : int
 {
 	//GameDamageType_Default
 	GameDamageType_Explosion = 1
