@@ -35,6 +35,9 @@
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE webGLContext = 0;
 static GLuint webProgram = 0;
 static GLuint webBlurProgram = 0;
+static GLuint webNormalMapProgram = 0;
+static GLuint webLightProgram = 0;
+static GLuint webDirLightProgram = 0;
 static GLuint webQuadVAO = 0, webQuadVBO = 0;
 // streamed vertex data goes into a pool of LARGE append-only buffers: each draw's
 // verts are written at an advancing offset with glBufferSubData and drawn with a
@@ -360,7 +363,11 @@ static inline void WebBindFBO(GLuint fbo)
 // wrappers skip the call when the binding is already current. every bind must route
 // through them, and WebResetBindCache() must run on context (re)creation.
 static GLuint webCurProgram = 0, webCurVAO = 0, webCurArrayBuffer = 0;
-static GLuint webCurTexture[2] = { 0, 0 };
+// one slot per texture unit the renderer can bind: 0/1 for the ubershader, 2 for the
+// light shaders' shadow map. WebBindTextureUnit indexes this by unit even when the cache
+// is off, so it must never be smaller than the highest unit in use.
+static const int webTextureUnitCount = 3;
+static GLuint webCurTexture[webTextureUnitCount] = { 0, 0, 0 };
 static int webCurActiveUnit = -1;
 
 // !! SKIPPING IS DISABLED !!  These were caches that skipped redundant binds, but the
@@ -376,7 +383,8 @@ ConsoleCommandSimple(bool, webBindCache, false);
 static void WebResetBindCache()
 {
 	webCurProgram = webCurVAO = webCurArrayBuffer = 0;
-	webCurTexture[0] = webCurTexture[1] = 0;
+	for (int unit = 0; unit < webTextureUnitCount; ++unit)
+		webCurTexture[unit] = 0;
 	webCurActiveUnit = -1;
 	// sampler objects and their cache belong to the context that created them
 	extern void WebResetSamplerCache();
@@ -439,14 +447,32 @@ enum
 	WebFlag_Modulate2		= 8,	// modulate by second texture (emissive sprite pass)
 	WebFlag_ForceFullBright	= 16,	// cpu-side only: skip the ambient multiply (never sent to gl)
 	WebFlag_BorderClamp2	= 32,	// second texture samples transparent black outside [0,1]
+	WebFlag_UseNormalMapShader = 64,// cpu-side only: draw through normalMapShader (never sent to gl)
 };
 
-// per-program uniform locations, looked up once at link
+// per-program uniform locations, looked up once at link. Every program shares the one
+// vertex shader, so the vs-side names resolve for all of them; the fs-side ones come back
+// -1 on programs that do not declare them and the apply path skips those.
 struct WebProgramLocs
 {
-	GLint worldViewProj, uvMatrix, uvMatrix2, color, flags, texture, texture2;
+	GLint worldViewProj, uvMatrix, uvMatrix2, color, flags, texture, texture2, texture3;
 };
-static WebProgramLocs webLocs, webBlurLocs;
+static WebProgramLocs webLocs, webBlurLocs, webNormalMapLocs, webLightLocs, webDirLightLocs;
+
+// program -> locs, so a draw can find its own uniform locations instead of assuming the
+// blur shader's. Registered by WebCompileProgram; small enough that a linear scan is
+// cheaper than anything smarter.
+struct WebProgramEntry { GLuint program; const WebProgramLocs* locs; };
+static WebProgramEntry webProgramTable[8];
+static int webProgramTableCount = 0;
+
+static const WebProgramLocs* WebFindProgramLocs(GLuint program)
+{
+	for (int i = 0; i < webProgramTableCount; ++i)
+		if (webProgramTable[i].program == program)
+			return webProgramTable[i].locs;
+	return &webLocs;
+}
 
 static const char* webVS = R"GLSL(#version 300 es
 layout(location = 0) in vec3 aPos;
@@ -516,6 +542,153 @@ void main()
 }
 )GLSL";
 
+// ---- normal mapping (deferredRender's normals pass and the two light shaders) --------
+//
+// All three are ported line for line from the .psh files in data/shaders, with the
+// uniform names kept identical so the constant-table emulation (FrankWebSetUniform*,
+// driven unchanged by deferredRender.cpp / frankRender.cpp) finds them by name.
+//
+// Matrix convention: D3DXMATRIX is row-major and HLSL's mul(vector, matrix) treats the
+// vector as a ROW vector. Uploading that same memory with glUniformMatrix4fv(transpose =
+// GL_FALSE) makes GLSL read it column-major, which yields the transpose - so GLSL's
+// M * v reproduces HLSL's mul(v, M) exactly. This is the same convention the ubershader's
+// uWorldViewProj already relies on (see WebComputeWVP).
+//
+// Sampling note: the .psh files sample everything with In.Texture, and the vertex shader
+// only differs between vUV/vUV2 when the two uv transforms differ - which they never do
+// on these draws. vUV is used throughout so the two can never desync.
+
+// normalMapShader.psh - rotate a tangent-space normal into world space
+static const char* webNormalMapFS = R"GLSL(#version 300 es
+precision highp float;
+uniform sampler2D uTexture;		// diffuse map (sampled for its alpha only)
+uniform sampler2D uTexture2;	// normal map
+uniform mat4 transformMatrix;
+uniform vec4 diffuseColor;
+uniform float diffuseNormalAlphaPercent;
+in vec2 vUV;
+out vec4 outColor;
+void main()
+{
+	// apply world space normal transform
+	vec4 normal = texture(uTexture2, vUV);
+	normal = 2.0 * normal - 1.0;
+	normal = transformMatrix * normal;
+	normal = 0.5 + 0.5 * normal;
+	vec4 c = clamp(normal, 0.0, 1.0);
+
+	// modulate in the diffuse texture alpha
+	float alpha = texture(uTexture, vUV).w;
+	alpha = 1.0 - (1.0 - alpha) * diffuseNormalAlphaPercent;
+	c.w *= alpha;
+
+	// modulate in the diffuse color
+	outColor = c * diffuseColor;
+}
+)GLSL";
+
+// deferredLightShader.psh - point light: N.L plus specular, masked by the shadow map
+static const char* webLightFS = R"GLSL(#version 300 es
+precision highp float;
+uniform sampler2D uTexture;		// normal map buffer
+uniform sampler2D uTexture2;	// specular map buffer
+uniform sampler2D uTexture3;	// shadow map / light gel
+uniform float lightHeight;
+uniform vec4 lightColor;
+uniform mat4 normalMatrix;
+uniform mat4 lightMatrix;
+uniform float specularPower;
+uniform float specularHeight;
+uniform float specularAmount;
+in vec2 vUV;
+out vec4 outColor;
+void main()
+{
+	// get the light direction (normalize on a float4 with w = 0 is a 3d normalize)
+	vec4 lightDirection = vec4(vUV, 0.0, 1.0);
+	lightDirection = lightMatrix * lightDirection;
+	lightDirection.z = lightHeight;
+	lightDirection.w = 0.0;
+	lightDirection = normalize(lightDirection);
+
+	// get the normal map coordinates
+	vec4 normalCoords = vec4(vUV, 1.0, 1.0);
+	normalCoords = normalMatrix * normalCoords;
+
+	// get the normal
+	vec3 normal = texture(uTexture, normalCoords.xy).xyz;
+	normal = 2.0 * normal - 1.0;
+	normal = normalize(normal);
+
+	// calculate lighting using a dot product
+	float brightness = clamp(dot(normal, lightDirection.xyz), 0.0, 1.0);
+
+	// calculate specular contribution
+	vec3 viewDirection = vec3(0.5, 0.5, 0.0) - normalCoords.xyz;
+	viewDirection.z = specularHeight;
+	viewDirection = normalize(viewDirection);
+	vec4 specularColor = texture(uTexture2, normalCoords.xy);
+	vec3 reflection = normalize(2.0 * brightness * normal - lightDirection.xyz);
+	// the exponent is guarded because glsl leaves pow(x, 0) undefined where hlsl returns
+	// 1: UpdateSimpleLight never sets these constants, so they are still 0 on the first
+	// frames, and a NaN here would survive the specularAmount multiply and poison the pixel
+	vec4 specular = specularColor * pow(clamp(dot(reflection, viewDirection), 0.0, 1.0), max(specularPower, 0.001));
+
+	// get the shadow map color
+	vec4 shadowMapColor = texture(uTexture3, vUV);
+
+	// modulate with shadow map and light color
+	outColor = (brightness + specularAmount * specular) * shadowMapColor * lightColor;
+}
+)GLSL";
+
+// directionalLightShader.psh - same, with the light direction supplied directly
+static const char* webDirLightFS = R"GLSL(#version 300 es
+precision highp float;
+uniform sampler2D uTexture;		// normal map buffer
+uniform sampler2D uTexture2;	// specular map buffer
+uniform sampler2D uTexture3;	// shadow map
+uniform vec4 lightDirection;
+uniform vec4 lightColor;
+uniform mat4 normalMatrix;
+uniform float specularPower;
+uniform float specularHeight;
+uniform float specularAmount;
+in vec2 vUV;
+out vec4 outColor;
+void main()
+{
+	// get the normal map coordinates
+	vec4 normalCoords = vec4(vUV, 1.0, 1.0);
+	normalCoords = normalMatrix * normalCoords;
+
+	// get the normal
+	vec3 normal = texture(uTexture, normalCoords.xy).xyz;
+	normal = 2.0 * normal - 1.0;
+	normal = normalize(normal);
+
+	// calculate lighting using a dot product
+	float brightness = clamp(dot(normal, lightDirection.xyz), 0.0, 1.0);
+
+	// calculate reflection vector
+	vec3 reflection = normalize(2.0 * brightness * normal - lightDirection.xyz);
+
+	// calculate specular contribution (the hlsl assigns a float3 to a float, taking .x)
+	vec3 viewDirection = vec3(0.5, 0.5, 0.0) - normalCoords.xyz;
+	viewDirection.z = specularHeight;
+	viewDirection = normalize(viewDirection);
+	vec3 specularIntensity = texture(uTexture2, normalCoords.xy).xyz;
+	// exponent guarded for the same reason as deferredLightShader above
+	float specular = specularIntensity.x * pow(clamp(dot(reflection, viewDirection), 0.0, 1.0), max(specularPower, 0.001));
+
+	// get the shadow map color
+	vec4 shadowMapColor = texture(uTexture3, vUV);
+
+	// modulate with shadow map and light color
+	outColor = (brightness + specularAmount * specular) * shadowMapColor * lightColor;
+}
+)GLSL";
+
 // row-major 4x4 multiply matching the engine's convention (a then b, row-vector order)
 static void WebMatMul(float* out, const float* a, const float* b)
 {
@@ -547,6 +720,14 @@ static GLuint WebCompileProgram(const char* vs, const char* fs, const char* labe
 		glAttachShader(program, s);
 	}
 	glLinkProgram(program);
+	GLint linked = 0;
+	glGetProgramiv(program, GL_LINK_STATUS, &linked);
+	if (!linked)
+	{
+		char log[1024];
+		glGetProgramInfoLog(program, sizeof(log), NULL, log);
+		printf("webRender: %s program link FAILED: %s\n", label, log);
+	}
 	locs.worldViewProj = glGetUniformLocation(program, "uWorldViewProj");
 	locs.uvMatrix = glGetUniformLocation(program, "uUVMatrix");
 	locs.uvMatrix2 = glGetUniformLocation(program, "uUVMatrix2");
@@ -554,6 +735,14 @@ static GLuint WebCompileProgram(const char* vs, const char* fs, const char* labe
 	locs.flags = glGetUniformLocation(program, "uFlags");
 	locs.texture = glGetUniformLocation(program, "uTexture");
 	locs.texture2 = glGetUniformLocation(program, "uTexture2");
+	locs.texture3 = glGetUniformLocation(program, "uTexture3");
+
+	if (webProgramTableCount < (int)(sizeof(webProgramTable)/sizeof(webProgramTable[0])))
+	{
+		webProgramTable[webProgramTableCount].program = program;
+		webProgramTable[webProgramTableCount].locs = &locs;
+		++webProgramTableCount;
+	}
 	return program;
 }
 
@@ -600,6 +789,9 @@ bool FrankWebRenderCreateContext()
 
 	webProgram = WebCompileProgram(webVS, webFS, "uber", webLocs);
 	webBlurProgram = WebCompileProgram(webVS, webBlurFS, "blur", webBlurLocs);
+	webNormalMapProgram = WebCompileProgram(webVS, webNormalMapFS, "normalMap", webNormalMapLocs);
+	webLightProgram = WebCompileProgram(webVS, webLightFS, "deferredLight", webLightLocs);
+	webDirLightProgram = WebCompileProgram(webVS, webDirLightFS, "directionalLight", webDirLightLocs);
 
 	// unit quad matching BuildQuad(): triangle strip, +-1, uv y-down
 	// layout: pos3, uv2, color4 (color = white on the static quad)
@@ -2054,7 +2246,8 @@ ConsoleCommandSimple(bool, webSamplerObjects, true);
 static const int webSamplerCacheMax = 16;
 static struct { WebSamplerState state; GLuint sampler; } webSamplerCache[webSamplerCacheMax];
 static int webSamplerCacheCount = 0;
-static GLuint webBoundSampler[2] = { 0, 0 };
+static const int webSamplerUnitCount = 3;	// unit 2 is the light shaders' shadow map / gel
+static GLuint webBoundSampler[webSamplerUnitCount] = { 0, 0, 0 };
 
 static GLuint WebGetSamplerObject(const WebSamplerState& want)
 {
@@ -2091,15 +2284,16 @@ static void WebBindSamplerUnit(int unit, GLuint sampler)
 // the unit's sampler, or it inherits whichever one the last draw left bound
 static void WebClearSamplers()
 {
-	WebBindSamplerUnit(0, 0);
-	WebBindSamplerUnit(1, 0);
+	for (int unit = 0; unit < webSamplerUnitCount; ++unit)
+		WebBindSamplerUnit(unit, 0);
 }
 
 // a fresh context invalidates every sampler name we handed out
 void WebResetSamplerCache()
 {
 	webSamplerCacheCount = 0;
-	webBoundSampler[0] = webBoundSampler[1] = 0;
+	for (int unit = 0; unit < webSamplerUnitCount; ++unit)
+		webBoundSampler[unit] = 0;
 }
 
 static void WebApplySampler(int unit, const WebSamplerState& sampler)
@@ -2129,7 +2323,8 @@ struct WebResolvedDraw
 	int flags;
 	FrankWebTexture* tex0;
 	FrankWebTexture* tex1;
-	WebSamplerState sampler0, sampler1;
+	FrankWebTexture* tex2;		// third sampler, light shaders only (uTexture3)
+	WebSamplerState sampler0, sampler1, sampler2;
 	WebBlendState blend;
 };
 
@@ -2138,10 +2333,11 @@ struct WebResolvedDraw
 static bool WebBatchKeyMatches(const WebResolvedDraw& a, const WebResolvedDraw& b)
 {
 	return a.program == b.program && a.flags == b.flags &&
-		a.tex0 == b.tex0 && a.tex1 == b.tex1 &&
+		a.tex0 == b.tex0 && a.tex1 == b.tex1 && a.tex2 == b.tex2 &&
 		memcmp(a.wvp, b.wvp, sizeof(a.wvp)) == 0 &&
 		memcmp(&a.sampler0, &b.sampler0, sizeof(a.sampler0)) == 0 &&
 		memcmp(&a.sampler1, &b.sampler1, sizeof(a.sampler1)) == 0 &&
+		memcmp(&a.sampler2, &b.sampler2, sizeof(a.sampler2)) == 0 &&
 		memcmp(&a.blend, &b.blend, sizeof(a.blend)) == 0;
 }
 
@@ -2204,6 +2400,22 @@ static void WebApplyResolvedDraw(const WebResolvedDraw& d, bool bakedUniforms)
 		else
 			WebBindSamplerUnit(1, 0);
 		glUniform1i(locs->texture2, 1);
+		glActiveTexture(GL_TEXTURE0);
+	}
+
+	if (locs->texture3 >= 0)
+	{
+		// the light shaders declare three samplers, so unit 2 must always hold something
+		// real - an unbound (or stale, framebuffer-attached) texture there is a feedback
+		// loop and webgl silently skips the whole draw
+		glActiveTexture(GL_TEXTURE2);
+		const bool haveTex2 = d.tex2 && d.tex2->glTexture;
+		glBindTexture(GL_TEXTURE_2D, haveTex2 ? d.tex2->glTexture : webWhiteTexture);
+		if (haveTex2)
+			WebApplySampler(2, d.sampler2);
+		else
+			WebBindSamplerUnit(2, 0);
+		glUniform1i(locs->texture3, 2);
 		glActiveTexture(GL_TEXTURE0);
 	}
 
@@ -2397,7 +2609,7 @@ static void WebDraw(const float* worldMatrix, const Color& colorIn, FrankWebText
 	WebResolvedDraw draw;
 	const bool usesPixelShader = (s.pixelShader && s.pixelShader->glProgram) != 0;
 	draw.program = usesPixelShader ? s.pixelShader->glProgram : webProgram;
-	draw.locs = usesPixelShader ? &webBlurLocs : &webLocs;
+	draw.locs = usesPixelShader ? WebFindProgramLocs(draw.program) : &webLocs;
 
 	// uv transform: explicit > captured texture transform (scrolling blocks) > identity
 	const float* uv = uvMatrix;
@@ -2453,10 +2665,32 @@ static void WebDraw(const float* worldMatrix, const Color& colorIn, FrankWebText
 			}
 		}
 	}
+	// The light shaders take all three inputs straight off the device stages, the way
+	// deferredRender.cpp binds them: 0 = normal buffer, 1 = specular buffer, 2 = shadow
+	// map (point light) or light gel. Only they declare uTexture3, so keying off that
+	// location leaves every other draw path untouched.
+	FrankWebTexture* tex2 = NULL;
+	if (draw.locs->texture3 >= 0)
+	{
+		if (!tex1)
+			tex1 = s.textures[1];
+		tex2 = s.textures[2];
+		if (webFixFeedback && webCurrentFBO && tex2 && tex2->glFBO == (GLuint)webCurrentFBO)
+		{
+			if (webFeedbackHits < 20)
+				printf("FEEDBACK: tex2 %u is attached to draw fbo %d (pass %d) - substituted white\n",
+					tex2->glTexture, (int)webCurrentFBO, (int)DeferredRender::GetRenderPass());
+			++webFeedbackHits;
+			tex2 = NULL;
+		}
+	}
+
 	draw.tex0 = tex0;
 	draw.tex1 = tex1;
+	draw.tex2 = tex2;
 	draw.sampler0 = WebResolveSamplerState(tex0, 0);
 	draw.sampler1 = WebResolveSamplerState(tex1, 1);
+	draw.sampler2 = WebResolveSamplerState(tex2, 2);
 	draw.blend = WebResolveBlendState();
 
 	// ---- batch decision. only the unit-quad path through the ubershader can batch, and
@@ -2667,6 +2901,35 @@ static FrankWebTexture* WebLoadImageProbe(const char* name)
 	return t;
 }
 
+// Load a companion map (name_e / name_n / name_s) and bake the diffuse map's silhouette
+// into its alpha, ONCE, at load. See the long note in LoadTexture for why.
+static FrankWebTexture* WebLoadCompanionMap(const char* baseName, const char* suffix,
+	const unsigned char* diffusePixels, int diffuseW, int diffuseH, bool& bakedAlphaOut)
+{
+	char name[FILENAME_STRING_LENGTH + 2];
+	snprintf(name, sizeof(name), "%s%s", baseName, suffix);
+
+	int w = 0, h = 0;
+	unsigned char* pixels = WebLoadImagePixels(name, w, h);
+	if (!pixels)
+		return NULL;
+
+	if (webBakeEmissiveAlpha && w == diffuseW && h == diffuseH)
+	{
+		const int pixelCount = w * h;
+		for (int i = 0; i < pixelCount; ++i)
+		{
+			const int a = pixels[i*4 + 3] * diffusePixels[i*4 + 3];
+			pixels[i*4 + 3] = (unsigned char)((a + 127) / 255);
+		}
+		bakedAlphaOut = true;
+	}
+
+	FrankWebTexture* t = WebCreateTextureFromPixels(pixels, w, h);
+	free(pixels);
+	return t;
+}
+
 bool FrankRender::LoadTexture(const WCHAR* textureName, TextureID ti)
 {
 	ASSERT(ti < MAX_TEXTURE_COUNT);
@@ -2686,53 +2949,41 @@ bool FrankRender::LoadTexture(const WCHAR* textureName, TextureID ti)
 	}
 	FrankWebTexture* tex = WebCreateTextureFromPixels(diffusePixels, diffuseW, diffuseH);
 
-	// emissive companion (name_e), mirroring the windows loader; the deferred emissive
-	// pass selects it. normal/specular companions are not used on web.
-	char nameEmissive[FILENAME_STRING_LENGTH + 2];
-	snprintf(nameEmissive, sizeof(nameEmissive), "%s_e", name);
-	int emissiveW = 0, emissiveH = 0;
-	unsigned char* emissivePixels = WebLoadImagePixels(nameEmissive, emissiveW, emissiveH);
-
-	FrankWebTexture* texEmissive = NULL;
+	// Companion maps (name_e emissive, name_n normal, name_s specular), mirroring the
+	// windows loader; the deferred passes select them through GetTexture.
+	//
+	// Each one gets the diffuse map's silhouette baked into its alpha, ONCE, at load.
+	// The windows path does this per draw: for the emissive/specular/normal passes it
+	// binds the diffuse texture to stage 1 with ALPHAOP = MODULATE and takes colour from
+	// stage 0 (terrainRender.cpp RenderCached, "use the alpha channel from the diffuse
+	// map"). Terrain on web has its own cached draw path that never sets stage 1 and
+	// samples the companion ALONE, so without this a tile whose art is partly transparent
+	// covered a full opaque square in those buffers. Doing it at load keeps the draw path
+	// completely untouched - no extra texture unit, no shader branch, no per-draw cost,
+	// and nothing that can interact with the sprite batcher.
+	//
+	// Multiply rather than replace, so a companion that carries its own alpha still means
+	// something. Sprites apply the diffuse alpha again themselves (the emissive pass via
+	// its diffuse x emissive draw, the normal pass inside normalMapShader), so for them
+	// it lands twice - a no-op for the hard 0/255 alpha of pixel art and a hair of extra
+	// falloff on an antialiased edge. The one real casualty is
+	// diffuseNormalAlphaPercent, which softens only the shader's copy and so cannot
+	// widen a normal past the baked silhouette; nothing in TestGame or Piroot uses it
+	// (only Perishable's decalEffect does).
 	bool bakedAlpha = false;
-	if (emissivePixels)
-	{
-		// Bake the diffuse map's silhouette into the emissive map's alpha, ONCE, at load.
-		//
-		// The windows path does this per draw: for the emissive/specular/normal passes it
-		// binds the diffuse texture to stage 1 with ALPHAOP = MODULATE and takes colour
-		// from stage 0 (terrainRender.cpp RenderCached, "use the alpha channel from the
-		// diffuse map"). Terrain on web samples the emissive map ALONE, so without this a
-		// tile whose art is partly transparent lit up as a full opaque square in the
-		// emissive pass. Doing it at load keeps the draw path completely untouched - no
-		// extra texture unit, no shader branch, no per-draw cost, and nothing that can
-		// interact with the sprite batcher.
-		//
-		// Multiply rather than replace, so an emissive map that carries its own alpha
-		// still means something. Sprites already got diffuse alpha via their
-		// diffuse x emissive draw, so their alpha is now applied twice - which is a no-op
-		// for the hard 0/255 alpha of pixel art and a hair of extra falloff on any
-		// antialiased edge.
-		if (webBakeEmissiveAlpha && emissiveW == diffuseW && emissiveH == diffuseH)
-		{
-			const int pixelCount = emissiveW * emissiveH;
-			for (int i = 0; i < pixelCount; ++i)
-			{
-				const int a = emissivePixels[i*4 + 3] * diffusePixels[i*4 + 3];
-				emissivePixels[i*4 + 3] = (unsigned char)((a + 127) / 255);
-			}
-			bakedAlpha = true;
-		}
-		texEmissive = WebCreateTextureFromPixels(emissivePixels, emissiveW, emissiveH);
-		free(emissivePixels);
-	}
+	FrankWebTexture* texEmissive = WebLoadCompanionMap(name, "_e", diffusePixels, diffuseW, diffuseH, bakedAlpha);
+	FrankWebTexture* texNormal   = WebLoadCompanionMap(name, "_n", diffusePixels, diffuseW, diffuseH, bakedAlpha);
+	FrankWebTexture* texSpecular = WebLoadCompanionMap(name, "_s", diffusePixels, diffuseW, diffuseH, bakedAlpha);
 	free(diffusePixels);
 
-	printf("webRender: loaded texture %s -> gl id %u%s%s\n", name, tex->glTexture,
-		texEmissive ? " (+emissive" : "", texEmissive ? (bakedAlpha ? ", alpha baked)" : ")") : "");
+	printf("webRender: loaded texture %s -> gl id %u%s%s%s%s\n", name, tex->glTexture,
+		texEmissive ? " (+emissive)" : "", texNormal ? " (+normal)" : "",
+		texSpecular ? " (+specular)" : "", bakedAlpha ? " (alpha baked)" : "");
 
 	textures[ti][TT_Diffuse].texture = tex;
 	textures[ti][TT_Emissive].texture = texEmissive;
+	textures[ti][TT_Normal].texture = texNormal;
+	textures[ti][TT_Specular].texture = texSpecular;
 	textureHashMap[wstring(textureName)] = ti;
 	if (ti > highestLoadedTextureID)
 		highestLoadedTextureID = ti;
@@ -2746,8 +2997,18 @@ LPDIRECT3DTEXTURE9 FrankRender::GetTexture(TextureID ti, bool deferredCheck) con
 	ASSERT(ti < MAX_TEXTURE_COUNT);
 	if (textures[ti][TT_Diffuse].tileSheetTi)
 		ti = textures[ti][TT_Diffuse].tileSheetTi;
-	if (DeferredRender::GetRenderPassIsEmissive() && deferredCheck)
-		return textures[ti][TT_Emissive].texture;
+	if (deferredCheck)
+	{
+		// same selection the windows loader makes (frankRender.cpp GetTexture). returning
+		// NULL when a companion is missing is deliberate: callers key off it to fall back
+		// to flat z-facing normals / black specular.
+		if (DeferredRender::GetRenderPassIsNormalMap())
+			return textures[ti][TT_Normal].texture;
+		if (DeferredRender::GetRenderPassIsSpecular())
+			return textures[ti][TT_Specular].texture;
+		if (DeferredRender::GetRenderPassIsEmissive())
+			return textures[ti][TT_Emissive].texture;
+	}
 	return textures[ti][TT_Diffuse].texture;
 }
 
@@ -2778,18 +3039,23 @@ void FrankRender::SetTextureTile(const WCHAR* textureName, TextureID tileSheetTi
 		textureHashMap[wstring(textureName)] = tileTi;
 }
 
-// shader loading: the blur shader gets the real GL program; everything else gets an
-// inert success handle so init logic keeps its windows behavior (with normal mapping
-// off those shaders are never drawn with)
+// Shader loading. The .psh files are never parsed on web - each known shader name maps to
+// a GLSL port compiled at context creation. Anything unrecognised still gets an inert
+// success handle (glProgram 0) so init logic keeps its windows behavior and its draws fall
+// back to the ubershader; visionShader is the only one that lands there today.
 bool FrankRender::LoadPixelShader(const WCHAR* name, LPDIRECT3DPIXELSHADER9& shader, LPD3DXCONSTANTTABLE& constants, bool loadFromResource)
 {
 	FrankWebPixelShader* ps = new FrankWebPixelShader();
 	FrankWebConstantTable* ct = new FrankWebConstantTable();
-	if (wcsstr(name, L"blurShader"))
-	{
-		ps->glProgram = webBlurProgram;
-		ct->glProgram = webBlurProgram;
-	}
+
+	GLuint program = 0;
+	if (wcsstr(name, L"blurShader"))				program = webBlurProgram;
+	else if (wcsstr(name, L"normalMapShader"))		program = webNormalMapProgram;
+	else if (wcsstr(name, L"deferredLightShader"))	program = webLightProgram;
+	else if (wcsstr(name, L"directionalLightShader")) program = webDirLightProgram;
+
+	ps->glProgram = program;
+	ct->glProgram = program;
 	shader = ps;
 	constants = ct;
 	return true;
@@ -2827,6 +3093,18 @@ void FrankRender::InitDeviceObjects()
 		verts[4] = { -1,  1, 0,  0, 0 };
 		primitiveQuadOutline.vb->Unlock();
 	}
+
+	// mirrors the windows InitDeviceObjects: the normal pass is gated on
+	// IsNormalMapShaderLoaded(), so this handle has to exist before it runs. Called
+	// directly rather than through g_render, which is still being constructed here.
+	if (DeferredRender::normalMappingEnable && !normalMapShader)
+	{
+		if (!LoadPixelShader(L"data/shaders/normalMapShader.psh", normalMapShader, normalMapConstantTable))
+		{
+			g_debugMessageSystem.AddError(L"Normal map shader failed to create!   Normal mapping disabled.");
+			DeferredRender::normalMappingEnable = false;
+		}
+	}
 }
 
 void FrankRender::DestroyDeviceObjects()
@@ -2837,12 +3115,59 @@ void FrankRender::DestroyDeviceObjects()
 
 FrankRender::FrankRender()
 {
+	// windows does this in its own ctor (frankRender.cpp:44). without it
+	// IsNormalMapShaderLoaded() reads uninitialised memory and the normal pass runs or
+	// not at random.
+	normalMapShader = NULL;
+	normalMapConstantTable = NULL;
 	InitDeviceObjects();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // core draw paths (pass-aware, mirroring RenderInternal's deferred branching)
 ////////////////////////////////////////////////////////////////////////////////////////
+
+// Port of the normal-map constant setup in RenderInternal (frankRender.cpp:1533-1574).
+// Builds the local-to-world normal rotation out of the draw's world matrix and pushes it
+// into the ported shader along with the diffuse colour and alpha percentage.
+static void WebSetNormalMapConstants(const Matrix44& matrix, const Color& color)
+{
+	// get rid of position and fix z scale
+	FrankMat44Base m = matrix.GetMatrixBase();
+	m._33 = 1;
+	m._41 = 0;
+	m._42 = 0;
+
+	// invert to get local transform
+	Matrix44 inverted = Matrix44(m).Inverse();
+	FrankMat44Base& m2 = inverted.GetMatrixBase();
+
+	// get rid of scale component
+	const Vector2 v1 = Vector2(m2._11, m2._12).Normalize();
+	m2._11 = v1.x;
+	m2._12 = v1.y;
+	const Vector2 v2 = Vector2(m2._21, m2._22).Normalize();
+	m2._21 = v2.x;
+	m2._22 = v2.y;
+
+	// check for flipped texture
+	if (Vector2::IsClockwise(Vector2(matrix.GetRight()), Vector2(matrix.GetUp())))
+	{
+		m2._12 = -m2._12;
+		m2._21 = -m2._21;
+	}
+
+	FrankWebSetUniformMatrix(webNormalMapProgram, "transformMatrix", &m2._11);
+
+	// use all white with diffuse alpha
+	const float diffuseColor[4] = { 1.0f, 1.0f, 1.0f, color.a };
+	FrankWebSetUniformVec4(webNormalMapProgram, "diffuseColor", diffuseColor);
+
+	float diffuseNormalAlphaPercent = 1;
+	if (DeferredRender::DiffuseNormalAlphaRenderBlock::IsActive())
+		diffuseNormalAlphaPercent = DeferredRender::DiffuseNormalAlphaRenderBlock::GetAlphaScale();
+	FrankWebSetUniformFloat(webNormalMapProgram, "diffuseNormalAlphaPercent", diffuseNormalAlphaPercent);
+}
 
 // per-pass adjustments for game-object sprites (port of frankRender.cpp RenderInternal):
 // returns false if the draw should be skipped for this pass
@@ -2855,6 +3180,56 @@ static bool WebAdjustForRenderPass(TextureID ti, const Color& colorIn, Color& co
 	if (DeferredRender::GetRenderPassIsDirectionalShadow() && !DeferredRender::BackgroundRenderBlock::IsActive())
 		return false;	// directional shadow pass only renders background-block objects
 
+	if (DeferredRender::GetRenderPassIsNormalMap())
+	{
+		// port of RenderInternal's normal branch (frankRender.cpp:1493-1594)
+		if (!tex0)
+		{
+			// no texture at all: flat z-facing normals
+			colorOut = Color(0.5f, 0.5f, 1.0f, colorIn.a);
+			return true;
+		}
+		FrankWebTexture* normalMap = g_render->GetTexture(ti, true);	// TT_Normal this pass
+		if (!normalMap)
+		{
+			// no normal map: flat z-facing normals, silhouette from the diffuse alpha
+			colorOut = Color(0.5f, 0.5f, 1.0f, colorIn.a);
+			extraFlags |= WebFlag_IgnoreTexRGB;
+			return true;
+		}
+		// real normal map: the ported shader rotates it into world space. tex0 stays the
+		// diffuse map, which the shader samples for its alpha (same binding as windows).
+		tex1 = normalMap;
+		colorOut = Color::White();
+		extraFlags |= WebFlag_UseNormalMapShader;
+		return true;
+	}
+
+	if (DeferredRender::GetRenderPassIsSpecular())
+	{
+		// port of RenderInternal's specular branch (frankRender.cpp:1595-1639). windows
+		// takes stage 1's colour with SELECTARG1, so the object colour never tints the
+		// specular buffer - only its alpha carries through.
+		const bool isSpecularBlock = DeferredRender::SpecularRenderBlock::IsActive();
+		if (!tex0)
+		{
+			colorOut = isSpecularBlock ? Color::White(colorIn.a) : Color::Black(colorIn.a);
+			return true;
+		}
+		FrankWebTexture* specularMap = g_render->GetTexture(ti, true);	// TT_Specular
+		if (specularMap)
+		{
+			// its alpha already carries the diffuse silhouette (baked in LoadTexture)
+			tex0 = specularMap;
+			colorOut = Color(1.0f, 1.0f, 1.0f, colorIn.a);
+			return true;
+		}
+		// no specular map: black (or white inside a specular block), silhouette from the
+		// diffuse alpha
+		colorOut = isSpecularBlock ? Color::White(colorIn.a) : Color(0.0f, 0.0f, 0.0f, colorIn.a);
+		extraFlags |= WebFlag_IgnoreTexRGB;
+		return true;
+	}
 
 	if (DeferredRender::GetRenderPassIsShadow() && !DeferredRender::TransparentRenderBlock::IsActive())
 	{
@@ -2908,6 +3283,13 @@ void FrankRender::Render(const Matrix44& matrix, const Color& color, TextureID t
 
 	const bool fullBright = (extraFlags & WebFlag_ForceFullBright) != 0;
 	extraFlags &= ~WebFlag_ForceFullBright;
+	const bool useNormalMapShader = (extraFlags & WebFlag_UseNormalMapShader) != 0;
+	extraFlags &= ~WebFlag_UseNormalMapShader;
+	if (useNormalMapShader)
+	{
+		WebSetNormalMapConstants(matrix, color);
+		FrankWebGetDeviceState().pixelShader = normalMapShader;
+	}
 
 	if (rp.vb && rp.vb->data && (&rp != &primitiveQuad))
 	{
@@ -2915,10 +3297,12 @@ void FrankRender::Render(const Matrix44& matrix, const Color& color, TextureID t
 		const int vertCount = WebParseVerts(rp.vb, rp.primitiveCount, rp.primitiveType, rp.stride, rp.fvf, mode);
 		if (vertCount >= 2)
 			WebDraw(&matrix.GetMatrixBase()._11, finalColor, tex0, tex1, NULL, extraFlags, !fullBright, webParsedVerts, vertCount, mode);
-		return;
 	}
+	else
+		WebDraw(&matrix.GetMatrixBase()._11, finalColor, tex0, tex1, NULL, extraFlags, !fullBright, NULL, 0, GL_TRIANGLE_STRIP);
 
-	WebDraw(&matrix.GetMatrixBase()._11, finalColor, tex0, tex1, NULL, extraFlags, !fullBright, NULL, 0, GL_TRIANGLE_STRIP);
+	if (useNormalMapShader)
+		FrankWebGetDeviceState().pixelShader = NULL;
 }
 
 void FrankRender::RenderTile(const IntVector2& tilePos, const IntVector2& tileSize, const Matrix44& matrix, const Color& color, TextureID ti, const RenderPrimitive& rp, int tileRotation, bool tileMirror)
@@ -2934,10 +3318,20 @@ void FrankRender::RenderTile(const IntVector2& tilePos, const IntVector2& tileSi
 		return;
 	const bool fullBright = (extraFlags & WebFlag_ForceFullBright) != 0;
 	extraFlags &= ~WebFlag_ForceFullBright;
+	const bool useNormalMapShader = (extraFlags & WebFlag_UseNormalMapShader) != 0;
+	extraFlags &= ~WebFlag_UseNormalMapShader;
+	if (useNormalMapShader)
+	{
+		WebSetNormalMapConstants(matrix, color);
+		FrankWebGetDeviceState().pixelShader = normalMapShader;
+	}
 
 	extern Matrix44 WebBuildTileUVMatrix(const IntVector2& tilePos, const IntVector2& tileSize, int tileRotation, bool tileMirror);
 	Matrix44 uvMatrix = WebBuildTileUVMatrix(tilePos, tileSize, tileRotation, tileMirror);
 	WebDraw(&matrix.GetMatrixBase()._11, finalColor, tex0, tex1, &uvMatrix.GetMatrixBase()._11, extraFlags, !fullBright, NULL, 0, GL_TRIANGLE_STRIP);
+
+	if (useNormalMapShader)
+		FrankWebGetDeviceState().pixelShader = NULL;
 }
 
 void FrankRender::RenderScreenSpace(const Matrix44& matrix, const Color& color, TextureID ti, const RenderPrimitive& rp)

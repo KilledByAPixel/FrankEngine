@@ -188,11 +188,10 @@ void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBas
 	g_render = new FrankRender();
 	g_textHelper = new CDXUTTextHelper();	// console/debug text draws through this
 
-	// web lighting scope (phase 5): the deferred pipeline runs for real, but without
-	// normal mapping (Piroot ships with it off; TestGame turns it on for windows) and
-	// without the vision pass. this must happen before InitDeviceObjects so the
-	// deferred init doesn't try to create normal-map targets.
-	DeferredRender::normalMappingEnable = false;
+	// web lighting scope: the deferred pipeline runs for real, including normal mapping
+	// and specular (normalMapShader / deferredLightShader / directionalLightShader are
+	// ported to GLSL in webRender.cpp), but still without the vision pass. Games that do
+	// not want normal mapping turn it off themselves, the same as on windows.
 	DeferredRender::visionEnable = false;
 
 	// mirror the reset-device path so the game gets its init hooks
