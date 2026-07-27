@@ -47,8 +47,13 @@ int DeferredRender::simpleLightCount = 0;
 // GL has no d3d9 half-texel offset (gl pixel centers already align with texel
 // centers), so the compensation must be zero or everything shifts up-left
 static const Vector2 halfPixel(0, 0);
+// same rule for the normal map sampling matrices, which apply their own half texel
+// correction rather than going through halfPixel. On gl that correction shifts the
+// normals by half a texel equally in x and y against the diffuse they light.
+static const float halfTexelCorrection = 0;
 #else
 static const Vector2 halfPixel(-1, 1);
+static const float halfTexelCorrection = 1;
 #endif
 bool DeferredRender::SpecularRenderBlock::active = false;
 bool DeferredRender::BackgroundRenderBlock::active = false;
@@ -377,8 +382,8 @@ void DeferredRender::UpdateSimpleLight(Light& light, const XForm2& xfFinal, cons
 			Vector2 offset = 0.5f*(xf.position - xfFinal.position)/cameraSize;
 			offset = 0.5f*(Vector2(1) - size) + offset * Vector2(1,-1);
 
-			// adjust for half pixel offset
-			offset -= 0.5f * size / textureSize;
+			// adjust for half pixel offset (d3d9 only, see halfTexelCorrection)
+			offset -= halfTexelCorrection * 0.5f * size / textureSize;
 
 			D3DXMATRIX m4
 			(
@@ -496,8 +501,8 @@ void DeferredRender::UpdateDynamicLight(Light& light)
 				Vector2 offset = 0.5f*(xf.position - xfFinal.position)/cameraSize;
 				offset = 0.5f*(Vector2(1) - size) + offset * Vector2(1,-1);
 
-				// adjust for half pixel offset
-				offset -= 0.5f * size / textureSize;
+				// adjust for half pixel offset (d3d9 only, see halfTexelCorrection)
+				offset -= halfTexelCorrection * 0.5f * size / textureSize;
 
 				D3DXMATRIX m4
 				(
@@ -2123,8 +2128,8 @@ void DeferredRender::RenderDirectionalPass()
 				Vector2 offset = 0.5f*size*(xf.position - xfFinal.position)/cameraSize;
 				offset = 0.5f*(Vector2(1) - size) + offset * Vector2(1,-1);
 
-				// correct for half pixel offset in normal map
-				offset -= Vector2(shadowMapZoom)/(2*textureSize*shadowMapZoom);
+				// correct for half pixel offset in normal map (d3d9 only)
+				offset -= halfTexelCorrection * Vector2(shadowMapZoom)/(2*textureSize*shadowMapZoom);
 
 				D3DXMATRIX matrix
 				(

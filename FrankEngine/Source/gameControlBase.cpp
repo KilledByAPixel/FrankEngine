@@ -19,7 +19,7 @@ Terrain*			g_terrain	= NULL;
 bool GameControlBase::showDebugInfo = false;
 ConsoleCommand(GameControlBase::showDebugInfo, debugInfoEnable);
 
-bool GameControlBase::autoSaveTerrain = true;
+bool GameControlBase::autoSaveTerrain = false;
 ConsoleCommand(GameControlBase::autoSaveTerrain, autoSaveTerrain);
 
 bool GameControlBase::editorMovePlayerToMouse = true;
