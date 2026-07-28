@@ -79,15 +79,36 @@ ConsoleCommandSimple(int, webPoolLimitKB, 0);
 // Kept only as a switch for further investigation. See the note in Upload().
 ConsoleCommandSimple(bool, webPoolStaticUsage, false);
 
-// EXPERIMENT (flicker derby D3): full storage respecification per upload instead of
-// sub-updates into a long-lived DYNAMIC buffer. glBufferData(STATIC, exactSize, data)
-// replaces the buffer's storage every time, which takes angle's staging-copy path
-// (CopySubresourceRegion into a buffer it direct-binds) - the shared streaming ring is
-// never involved. attribs are re-pointed after every respec because VertexArray11 does
-// not raise a d3d dirty bit for new buffer data on direct storage (same workaround the
-// terrain cache uses, proven correct there). slower on paper (~50-100 respecs/frame);
-// exists to answer "does the bug stop when nothing rides the dynamic path?"
-ConsoleCommandSimple(bool, webPoolRespec, false);
+// Flicker derby D3, PROMOTED to the default path on apple gpus (2026-07-28): full
+// storage respecification per upload instead of sub-updates into a long-lived buffer.
+// glBufferData(STATIC, exactSize, data) replaces the buffer's storage every time.
+//
+// On angle/D3D11 this takes the staging-copy path (CopySubresourceRegion into a buffer
+// it direct-binds) - the shared streaming ring is never involved. attribs are re-pointed
+// after every respec because VertexArray11 does not raise a d3d dirty bit for new buffer
+// data on direct storage (same workaround the terrain cache uses, proven correct there).
+//
+// On angle/METAL (safari AND chrome on every apple device) the trade INVERTS, and the
+// append pool becomes the worst case in angle's buffer code: a glBufferSubData at a
+// nonzero offset into a buffer the gpu is using is handled by allocating a NEW
+// full-size MTLBuffer and GPU-BLITTING EVERY BYTE NOT OVERWRITTEN
+// (BufferMtl::putDataInNewBufferAndStartUsingNewBuffer). With 8MB pool buffers and
+// interleaved append->draw->append, every append after a frame's first drags ~8MB of
+// hidden copy traffic to deliver a few hundred bytes of verts - at our ~1300
+// sub-updates/frame that can eat an apple gpu's entire memory bandwidth, invisibly
+// (no gl error, no draw count change; only a Metal trace shows it). Respec instead
+// declares the old contents dead: nothing preserved, nothing blitted, and exact-size
+// data skips angle's preserve guard entirely. See local/safari-macos26-round2 notes.
+//
+// -1 = auto: ON for tile-based (apple) gpus, OFF for d3d11-backed browsers, whose
+// dropped-draw-under-contention bug is the reason the append pool exists at all.
+// 0/1 force it, so ?cvar=webPoolRespec+0 (or +1) stays a one-url A/B on any machine.
+ConsoleCommandSimple(int, webPoolRespec, -1);
+static bool WebGpuIsTileBased();	// defined with the present/flush apple gating below
+static bool WebPoolRespecActive()
+{
+	return webPoolRespec < 0 ? WebGpuIsTileBased() : webPoolRespec != 0;
+}
 
 // GL binding cache helpers (defined below with the rest of the state tracking) - the
 // pool binds its vao/buffer through these so redundant binds cost nothing
@@ -137,7 +158,7 @@ struct WebChunkPool
 	int Upload(const void* verts, int vertCount)
 	{
 		const int bytes = vertCount * stride;
-		if (webPoolRespec)
+		if (WebPoolRespecActive())
 		{
 			// derby D3: rotate buffers and replace storage outright. every upload gets
 			// brand-new STATIC storage, so no draw can ever read a byte the gpu still
@@ -1255,9 +1276,9 @@ static bool WebGpuIsTileBased()
 			if (/Mac/.test(n.platform || "")) return 1;	// apple silicon; intel macs cost nothing here
 			return 0;
 		});
-		printf("webRender: %s gpu - offscreen present %s, mid-frame flushes %s\n",
+		printf("webRender: %s gpu - offscreen present %s, mid-frame flushes %s, buffer respec default %s\n",
 			isTiled ? "apple/tile-based" : "immediate-mode",
-			isTiled ? "OFF" : "on", isTiled ? "OFF" : "on");
+			isTiled ? "OFF" : "on", isTiled ? "OFF" : "on", isTiled ? "ON" : "off");
 	}
 	return isTiled > 0;
 }
