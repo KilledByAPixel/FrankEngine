@@ -26,7 +26,7 @@ Frank Engine compiles to WebAssembly, so games built with it run in a browser wi
 ## Videos
 
 ### [Engine Demo](https://www.youtube.com/watch?v=lA8xqr14QIY) - Showing features of the engine
-### [Piroot Trailer](https://www.youtube.com/watch?v=O11VUcfbRC4) - Physics based metroidvania
+### [Piroot Trailer](https://www.youtube.com/watch?v=m9VMf790ld8) - Physics based metroidvania
 ### [Bulkhead Demo](https://www.youtube.com/watch?v=bAQeQzmu1mA) - Top down roguelike shooter
 
 ## Screenshots
