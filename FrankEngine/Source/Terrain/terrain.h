@@ -148,6 +148,7 @@ public:
 
 	Box2AABB GetStreamWindow() const { return streamWindow; }
 	void UpdateActiveWindow();
+	void OnWorldReset();
 	void UpdatePost();
 	
 	IntVector2 GetTileIndex(const Vector2& pos) const;

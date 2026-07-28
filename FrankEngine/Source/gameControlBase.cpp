@@ -141,6 +141,12 @@ void GameControlBase::Reset()
 		// reload terrain on reset
 		g_terrain->Load(Terrain::terrainFilename);
 	}
+	else
+	{
+		// terrain was not reloaded this reset, so tell it the world was reset directly.
+		// without this its patches keep stale active flags and never rebuild their stub objects.
+		g_terrain->OnWorldReset();
+	}
 
 	lastResetMode = gameMode;
 	

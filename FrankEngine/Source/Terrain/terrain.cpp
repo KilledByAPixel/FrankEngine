@@ -222,6 +222,27 @@ void Terrain::UpdateActiveWindow()
 	wasReset = false;
 }
 
+void Terrain::OnWorldReset()
+{
+	// the object manager has just destroyed every object our patches created from stubs, but
+	// patches are built with addToWorld == false so they are not in the object manager and their
+	// active flags survived the reset.  clear the object flag so the next UpdateActiveWindow()
+	// rebuilds the stubs instead of early outing on "already active".
+	// note this only clears objects, not physics - the patch physics body is not owned by the
+	// object manager either, so it is still alive and still correct for the unchanged tile data.
+	for(int i=0; i<fullSize.x; ++i)
+	for(int j=0; j<fullSize.y; ++j)
+	{
+		TerrainPatch* patch = GetPatch(i,j);
+		if (patch)
+			patch->SetActiveObjects(false);
+	}
+
+	// make UpdateActiveWindow() take its reset path (Load() normally does this, but it is only
+	// called on reset when autoSaveTerrain is set)
+	wasReset = true;
+}
+
 void Terrain::UpdatePost()
 {
 	// update physics or terrain that needs rebuild
