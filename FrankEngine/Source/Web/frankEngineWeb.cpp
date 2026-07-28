@@ -73,6 +73,33 @@ static void WebRunUrlConsoleCommands()
 }
 
 //--------------------------------------------------------------------------------------
+// ?res=WIDTHxHEIGHT on the url overrides the boot backbuffer size (e.g. ?res=960x540).
+// A 960x540 embed on a dpr-1 monitor displays exactly 960x540 physical pixels, so a
+// 1280x720 backbuffer there is pure wasted fill (~44% extra, and the light targets
+// scale with it). This is the test lever for embed-matched resolution; a dynamic
+// resize on fullscreen change would build on the same override point.
+// same EM_JS caveat as above: no backslashes, so [0-9] rather than a d escape
+EM_JS(int, WebJsGetUrlResolution, (int* outW, int* outH), {
+	var q = (location.search || "") + (location.hash || "");
+	var m = q.match(/res=([0-9]+)x([0-9]+)/);
+	if (!m)
+		return 0;
+	HEAP32[outW >> 2] = +m[1];
+	HEAP32[outH >> 2] = +m[2];
+	return 1;
+});
+
+// the engine owns the drawing buffer size; the canvas element's width/height
+// attributes in the page are just the default. guarded so headless node (no DOM)
+// falls through silently.
+EM_JS(void, WebJsSetCanvasSize, (int w, int h), {
+	if (typeof document === "undefined")
+		return;
+	var c = (typeof Module !== "undefined" && Module.canvas) || document.getElementById("canvas");
+	if (c) { c.width = w; c.height = h; }
+});
+
+//--------------------------------------------------------------------------------------
 // Frank Engine Globals (mirrors frankEngine.cpp)
 int								g_backBufferWidth = 0;
 int								g_backBufferHeight = 0;
@@ -157,6 +184,80 @@ void FrankEngineStartup(const WCHAR* title, int maxObjectCount, size_t maxObject
 }
 
 //--------------------------------------------------------------------------------------
+// Dynamic backbuffer resolution: render at the size the canvas is actually DISPLAYED
+// at (css size x devicePixelRatio), capped per axis at the design resolution passed to
+// FrankEngineInit. A 960x540 embed on a dpr-1 monitor gets a 960x540 backbuffer (~44%
+// less fill, and the light targets scale with it); going fullscreen grows the element,
+// so the same check restores the full 1280x720. The cap is what protects retina/4K
+// (dpr 2+) viewers from a huge backbuffer - css x dpr exceeds the design size there,
+// so they stay at 1280x720 exactly as before this feature.
+ConsoleCommandSimple(bool, webDynamicResolution, true);
+static int webDesignWidth = 1280, webDesignHeight = 720;
+static bool webResPinned = false;			// explicit ?res= wins; dynamic sizing stands down
+static double webResChangedTime = 0;		// when a differing display size was first seen
+static int webResLastW = 0, webResLastH = 0;
+
+// displayed size of the canvas in device pixels, capped at the design resolution.
+// false where there is no dom to measure (headless node).
+static bool WebGetDisplayPixelSize(int& outW, int& outH)
+{
+	double cssW = 0, cssH = 0;
+	if (emscripten_get_element_css_size("#canvas", &cssW, &cssH) != EMSCRIPTEN_RESULT_SUCCESS || cssW <= 0 || cssH <= 0)
+		return false;
+	const double dpr = emscripten_get_device_pixel_ratio();
+	outW = Min((int)(cssW * dpr + 0.5), webDesignWidth);
+	outH = Min((int)(cssH * dpr + 0.5), webDesignHeight);
+	return true;
+}
+
+// called at the top of every frame, before update and render - the same spot the
+// pause menu's graphics rebuild is safe in. windows gets this behavior from dxut's
+// WM_SIZE path; the web shell has to watch the element itself.
+static void WebUpdateDynamicResolution()
+{
+	if (!webDynamicResolution || webResPinned || !g_gameControlBase)
+		return;
+
+	int targetW, targetH;
+	if (!WebGetDisplayPixelSize(targetW, targetH))
+		return;
+
+	// a pixel of css layout jitter is not a resize
+	if (abs(targetW - g_backBufferWidth) < 8 && abs(targetH - g_backBufferHeight) < 8)
+	{
+		webResChangedTime = 0;
+		return;
+	}
+
+	// debounce: drag-resizes and fullscreen transitions emit a stream of sizes, and
+	// every apply pays a full device rebuild (including the minimap re-render) - so
+	// wait for the target to hold still before committing to one
+	const double now = emscripten_get_now();
+	if (webResChangedTime == 0 || abs(targetW - webResLastW) >= 8 || abs(targetH - webResLastH) >= 8)
+	{
+		webResChangedTime = now;
+		webResLastW = targetW;
+		webResLastH = targetH;
+		return;
+	}
+	if (now - webResChangedTime < 600)
+		return;
+	webResChangedTime = 0;
+
+	printf("web: dynamic resolution %dx%d -> %dx%d\n", g_backBufferWidth, g_backBufferHeight, targetW, targetH);
+	WebJsSetCanvasSize(targetW, targetH);
+	g_backBufferWidth = targetW;
+	g_backBufferHeight = targetH;
+	g_aspectRatio = (float)targetW / (float)targetH;
+
+	// the render targets are sized when device objects are built - same rebuild pair
+	// the pause menu's graphics row uses, and the gui lays itself back out after
+	g_gameControlBase->DestroyDeviceObjects();
+	g_gameControlBase->InitDeviceObjects();
+	g_guiBase->OnResetDevice();
+}
+
+//--------------------------------------------------------------------------------------
 void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBase* gameGui, Camera* camera)
 {
 	ASSERT(gameControl && !g_gameControlBase);
@@ -179,6 +280,33 @@ void FrankEngineInit(int width, int height, GameControlBase* gameControl, GuiBas
 	g_gameControlBase = gameControl;
 	g_guiBase = gameGui;
 	g_guiBase->Init();
+
+	// pick the boot backbuffer size; the canvas drawing buffer must match the
+	// backbuffer or the viewport and present sizes disagree
+	{
+		webDesignWidth = width;
+		webDesignHeight = height;
+		int w = 0, h = 0;
+		if (WebJsGetUrlResolution(&w, &h))
+		{
+			// explicit ?res=WxH pins the size for the whole run (dev/test lever)
+			width = Cap(w, 320, 1920);
+			height = Cap(h, 180, 1080);
+			webResPinned = true;
+			printf("web: ?res override -> %dx%d (pinned)\n", width, height);
+		}
+		else if (webDynamicResolution && WebGetDisplayPixelSize(w, h))
+		{
+			// boot straight at the displayed size instead of building full-size
+			// targets only to rebuild them a moment later
+			width = w;
+			height = h;
+			if (width != webDesignWidth || height != webDesignHeight)
+				printf("web: boot resolution %dx%d (display-matched, design %dx%d)\n",
+					width, height, webDesignWidth, webDesignHeight);
+		}
+	}
+	WebJsSetCanvasSize(width, height);
 
 	// create the WebGL2 context (headless runs continue without rendering)
 	extern bool FrankWebRenderCreateContext();
@@ -225,6 +353,10 @@ static void FrankEngineWebFrame()
 
 	if (!g_gameControlBase)
 		return;
+
+	// track the displayed size and rebuild the backbuffer to match (embed vs
+	// fullscreen); must run before update/render, never mid-frame
+	WebUpdateDynamicResolution();
 
 	if (webFirstUpdate)
 	{
