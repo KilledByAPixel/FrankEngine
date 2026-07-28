@@ -1100,3 +1100,8 @@ public:
 	double GetElapsedTime() { return 0; }
 	bool IsStopped() { return true; }
 };
+
+// newgrounds medal unlock - forwards to a hook the hosting page may define
+// (globalThis.frankMedalUnlock). pages not on newgrounds simply do not define it,
+// so calls are safe no-ops everywhere else. defined in Web/frankEngineWeb.cpp.
+extern "C" void FrankWebMedalUnlock(int medalId);

@@ -100,6 +100,16 @@ EM_JS(void, WebJsSetCanvasSize, (int w, int h), {
 });
 
 //--------------------------------------------------------------------------------------
+// newgrounds medal unlock - forwards to a hook the hosting page may define
+// (newgroundsMedal.js on the piroot release page). fire and forget: the hook itself
+// only exists when the page is running inside newgrounds with a logged-in session,
+// so this is a safe no-op on itch, direct visits, headless runs and every other host.
+EM_JS(void, FrankWebMedalUnlock, (int medalId), {
+	if (typeof globalThis !== "undefined" && globalThis.frankMedalUnlock)
+		globalThis.frankMedalUnlock(medalId);
+});
+
+//--------------------------------------------------------------------------------------
 // Frank Engine Globals (mirrors frankEngine.cpp)
 int								g_backBufferWidth = 0;
 int								g_backBufferHeight = 0;
