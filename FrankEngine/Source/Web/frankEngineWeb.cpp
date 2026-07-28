@@ -29,7 +29,10 @@
 // NOTE: no backslashes in here. EM_JS stringifies the body through the C preprocessor,
 // so a regex escape like \+ is eaten as an unknown C escape and the JS breaks at runtime
 EM_JS(void, WebJsGetUrlCvars, (char* out, int maxSize), {
-	out[0] = 0;
+	// `out` arrives here as a plain NUMBER (the wasm heap address), NOT an array - so
+	// `out[0] = 0` sets a property on a Number primitive and writes nothing at all.
+	// Index the heap explicitly or the caller is left holding uninitialized stack.
+	HEAPU8[out] = 0;
 	var search = (location.search || "") + (location.hash || "");
 	var start = search.indexOf("cvar=");
 	if (start < 0)
@@ -44,7 +47,9 @@ EM_JS(void, WebJsGetUrlCvars, (char* out, int maxSize), {
 
 static void WebRunUrlConsoleCommands()
 {
-	char cvars[1024];
+	// belt and braces: the JS above clears this too, but an uninitialized buffer here
+	// gets parsed as console commands, so never rely on the other side for it
+	char cvars[1024] = {0};
 	WebJsGetUrlCvars(cvars, sizeof(cvars));
 
 	for (char* command = cvars; *command; )
