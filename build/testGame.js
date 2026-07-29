@@ -29,7 +29,7 @@ var ENVIRONMENT_IS_SHELL = !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIR
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// include: C:\Users\frank\AppData\Local\Temp\tmpts6yq1mt.js
+// include: C:\Users\frank\AppData\Local\Temp\tmphsyiy20c.js
 
   if (!Module['expectedDataFileDownloads']) Module['expectedDataFileDownloads'] = 0;
   Module['expectedDataFileDownloads']++;
@@ -166,7 +166,7 @@ Module['FS_createPath']("/data", "terrain", true, true);
 
   })();
 
-// end include: C:\Users\frank\AppData\Local\Temp\tmpts6yq1mt.js
+// end include: C:\Users\frank\AppData\Local\Temp\tmphsyiy20c.js
 
 
 var programArgs = [];
@@ -6339,6 +6339,10 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
       _exit(status);
     };
 
+  var _emscripten_get_device_pixel_ratio = () => {
+      return globalThis.devicePixelRatio ?? 1.0;
+    };
+
   var maybeCStringToJsString = (cString) => {
       // "cString > 2" checks if the input is a number, and isn't of the special
       // values we accept here, EMSCRIPTEN_EVENT_TARGET_* (which map to 0, 1, 2).
@@ -8254,17 +8258,17 @@ if (Module['printErr']) err = Module['printErr'];
 // end include: postlibrary.js
 
 var ASM_CONSTS = {
-  103637: () => { var c = document.getElementById("canvas"); if (!c || c.__frankContextHooks) return; c.__frankContextHooks = 1; c.addEventListener("webglcontextlost", function(e) { e.preventDefault(); console.error("webRender: WEBGL CONTEXT LOST - rendering has stopped"); if (typeof Module !== "undefined") Module.frankContextLost = 1; }, false); c.addEventListener("webglcontextrestored", function() { console.warn("webRender: webgl context restored by the browser"); if (typeof Module !== "undefined") Module.frankContextRestored = 1; }, false); },  
- 104173: ($0, $1, $2, $3) => { var w = $0; var h = $1; var ptr = $2; var frame = $3; var c = document.createElement('canvas'); c.width = w; c.height = h; var img = new ImageData(new Uint8ClampedArray(HEAPU8.buffer, ptr, w*h*4).slice(), w, h); c.getContext('2d').putImageData(img, 0, 0); var a = document.createElement('a'); a.download = 'flickerShadowMap_' + frame + '.png'; a.href = c.toDataURL(); a.click(); var g = document.getElementById('canvas'); if (g) { var a2 = document.createElement('a'); a2.download = 'flickerFrame_' + frame + '.png'; a2.href = g.toDataURL(); a2.click(); } },  
- 104733: () => { var q = (location.search || "") + (location.hash || ""); return q.indexOf("rgb8") >= 0 && q.indexOf("rgba8") < 0 ? 1 : 0; },  
- 104859: () => { var n = navigator; if (/iPad|iPhone|iPod/.test(n.platform || "")) return 1; if (/Mac/.test(n.platform || "") && (n.maxTouchPoints || 0) > 1) return 1; if (/Mac/.test(n.platform || "")) return 1; return 0; },  
- 105068: () => { return ((location.search || "") + (location.hash || "")).indexOf("nomap") >= 0 ? 1 : 0; },  
- 105160: ($0, $1) => { GLctx.getBufferSubData(0x88EB, 0, HEAPU8.subarray($0, $0 + $1)); },  
- 105229: ($0, $1, $2) => { try { if (typeof navigator === 'undefined' || !navigator.getGamepads) return; var p = navigator.getGamepads()[$0]; if (p && p.vibrationActuator) p.vibrationActuator.playEffect('dual-rumble', { duration: 150, strongMagnitude: $1, weakMagnitude: $2 }); } catch (e) {} },  
- 105499: () => { try { if (typeof localStorage === 'undefined') return; for (var i = 0; i < localStorage.length; ++i) { var key = localStorage.key(i); if (!key || key.indexOf('frankfs/') !== 0) continue; var name = key.slice(8); var bin = atob(localStorage.getItem(key)); var data = new Uint8Array(bin.length); for (var j = 0; j < bin.length; ++j) data[j] = bin.charCodeAt(j); FS.writeFile('/' + name, data); out('restored ' + name + ' from localStorage (' + data.length + ' bytes)'); } } catch (e) { out('save restore failed: ' + e); } },  
- 106023: () => { if (typeof document !== 'undefined') { var c = document.getElementById('canvas'); if (c && c.focus) c.focus(); } },  
- 106140: () => { return (typeof window === 'undefined') ? 1 : 0; },  
- 106192: () => { try { if (typeof localStorage === 'undefined') return; var files = FS.readdir('/'); for (var i = 0; i < files.length; ++i) { var name = files[i]; if (name.slice(-4) !== '.sav') continue; var data = FS.readFile('/' + name); var s = ""; for (var j = 0; j < data.length; j += 32768) s += String.fromCharCode.apply(null, data.subarray(j, j + 32768)); var b64 = btoa(s); var key = 'frankfs/' + name; if (localStorage.getItem(key) !== b64) localStorage.setItem(key, b64); } } catch (e) {} }
+  104454: () => { var c = document.getElementById("canvas"); if (!c || c.__frankContextHooks) return; c.__frankContextHooks = 1; c.addEventListener("webglcontextlost", function(e) { e.preventDefault(); console.error("webRender: WEBGL CONTEXT LOST - rendering has stopped"); if (typeof Module !== "undefined") Module.frankContextLost = 1; }, false); c.addEventListener("webglcontextrestored", function() { console.warn("webRender: webgl context restored by the browser"); if (typeof Module !== "undefined") Module.frankContextRestored = 1; }, false); },  
+ 104990: ($0, $1, $2, $3) => { var w = $0; var h = $1; var ptr = $2; var frame = $3; var c = document.createElement('canvas'); c.width = w; c.height = h; var img = new ImageData(new Uint8ClampedArray(HEAPU8.buffer, ptr, w*h*4).slice(), w, h); c.getContext('2d').putImageData(img, 0, 0); var a = document.createElement('a'); a.download = 'flickerShadowMap_' + frame + '.png'; a.href = c.toDataURL(); a.click(); var g = document.getElementById('canvas'); if (g) { var a2 = document.createElement('a'); a2.download = 'flickerFrame_' + frame + '.png'; a2.href = g.toDataURL(); a2.click(); } },  
+ 105550: () => { var q = (location.search || "") + (location.hash || ""); return q.indexOf("rgb8") >= 0 && q.indexOf("rgba8") < 0 ? 1 : 0; },  
+ 105676: () => { var n = navigator; if (/iPad|iPhone|iPod/.test(n.platform || "")) return 1; if (/Mac/.test(n.platform || "") && (n.maxTouchPoints || 0) > 1) return 1; if (/Mac/.test(n.platform || "")) return 1; return 0; },  
+ 105885: () => { return ((location.search || "") + (location.hash || "")).indexOf("nomap") >= 0 ? 1 : 0; },  
+ 105977: ($0, $1) => { GLctx.getBufferSubData(0x88EB, 0, HEAPU8.subarray($0, $0 + $1)); },  
+ 106046: ($0, $1, $2) => { try { if (typeof navigator === 'undefined' || !navigator.getGamepads) return; var p = navigator.getGamepads()[$0]; if (p && p.vibrationActuator) p.vibrationActuator.playEffect('dual-rumble', { duration: 150, strongMagnitude: $1, weakMagnitude: $2 }); } catch (e) {} },  
+ 106316: () => { try { if (typeof localStorage === 'undefined') return; for (var i = 0; i < localStorage.length; ++i) { var key = localStorage.key(i); if (!key || key.indexOf('frankfs/') !== 0) continue; var name = key.slice(8); var bin = atob(localStorage.getItem(key)); var data = new Uint8Array(bin.length); for (var j = 0; j < bin.length; ++j) data[j] = bin.charCodeAt(j); FS.writeFile('/' + name, data); out('restored ' + name + ' from localStorage (' + data.length + ' bytes)'); } } catch (e) { out('save restore failed: ' + e); } },  
+ 106840: () => { if (typeof document !== 'undefined') { var c = document.getElementById('canvas'); if (c && c.focus) c.focus(); } },  
+ 106957: () => { return (typeof window === 'undefined') ? 1 : 0; },  
+ 107009: () => { try { if (typeof localStorage === 'undefined') return; var files = FS.readdir('/'); for (var i = 0; i < files.length; ++i) { var name = files[i]; if (name.slice(-4) !== '.sav') continue; var data = FS.readFile('/' + name); var s = ""; for (var j = 0; j < data.length; j += 32768) s += String.fromCharCode.apply(null, data.subarray(j, j + 32768)); var b64 = btoa(s); var key = 'frankfs/' + name; if (localStorage.getItem(key) !== b64) localStorage.setItem(key, b64); } } catch (e) {} }
 };
 function WebJsNarrowSubData(target,offset,data,size) { GLctx.bufferSubData(target, offset, HEAPU8.subarray(data, data + size)); }
 function WebJsStagedSubData(target,offset,data,size) { if (!globalThis.__frankStage || globalThis.__frankStage.byteLength < size) globalThis.__frankStage = new Uint8Array(size < (1 << 20) ? (1 << 20) : size); var stage = globalThis.__frankStage; stage.set(HEAPU8.subarray(data, data + size)); GLctx.bufferSubData(target, offset, stage, 0, size); }
@@ -8277,7 +8281,10 @@ function WebMusicJSSetVolume(gain) { var fm = globalThis.frankMusic; if (!fm) re
 function WebMusicJSSetRate(rate) { var fm = globalThis.frankMusic; if (!fm) return; fm.rate = rate; if (fm.cur && fm.cur.src) fm.cur.src.playbackRate.value = rate; }
 function WebMusicJSPause(pause) { var fm = globalThis.frankMusic; if (!fm) return; fm.userPaused = !!pause; if (pause) fm.ctx.suspend(); else if (fm.canRun()) fm.ctx.resume(); }
 function WebMusicJSIsPlaying() { var fm = globalThis.frankMusic; return (fm && (fm.pending || (fm.cur && fm.cur.src))) ? 1 : 0; }
-function WebJsGetUrlCvars(out,maxSize) { out[0] = 0; var search = (location.search || "") + (location.hash || ""); var start = search.indexOf("cvar="); if (start < 0) return; var text = search.substring(start + 5); var amp = text.indexOf("&"); if (amp >= 0) text = text.substring(0, amp); var hash = text.indexOf("#"); if (hash >= 0) text = text.substring(0, hash); stringToUTF8(decodeURIComponent(text.split("+").join(" ")), out, maxSize); }
+function WebJsGetUrlCvars(out,maxSize) { HEAPU8[out] = 0; var search = (location.search || "") + (location.hash || ""); var start = search.indexOf("cvar="); if (start < 0) return; var text = search.substring(start + 5); var amp = text.indexOf("&"); if (amp >= 0) text = text.substring(0, amp); var hash = text.indexOf("#"); if (hash >= 0) text = text.substring(0, hash); stringToUTF8(decodeURIComponent(text.split("+").join(" ")), out, maxSize); }
+function WebJsGetUrlResolution(outW,outH) { var q = (location.search || "") + (location.hash || ""); var m = q.match(/res=([0-9]+)x([0-9]+)/); if (!m) return 0; HEAP32[outW >> 2] = +m[1]; HEAP32[outH >> 2] = +m[2]; return 1; }
+function WebJsSetCanvasSize(w,h) { if (typeof document === "undefined") return; var c = (typeof Module !== "undefined" && Module.canvas) || document.getElementById("canvas"); if (c) { c.width = w; c.height = h; } }
+function FrankWebMedalUnlock(medalId) { if (typeof globalThis !== "undefined" && globalThis.frankMedalUnlock) globalThis.frankMedalUnlock(medalId); }
 
 // Imports from the Wasm binary.
 var _malloc,
@@ -8307,7 +8314,11 @@ var wasmImports = {
   /** @export */
   WebJsGetUrlCvars,
   /** @export */
+  WebJsGetUrlResolution,
+  /** @export */
   WebJsNarrowSubData,
+  /** @export */
+  WebJsSetCanvasSize,
   /** @export */
   WebJsStagedSubData,
   /** @export */
@@ -8384,6 +8395,8 @@ var wasmImports = {
   emscripten_date_now: _emscripten_date_now,
   /** @export */
   emscripten_force_exit: _emscripten_force_exit,
+  /** @export */
+  emscripten_get_device_pixel_ratio: _emscripten_get_device_pixel_ratio,
   /** @export */
   emscripten_get_element_css_size: _emscripten_get_element_css_size,
   /** @export */
