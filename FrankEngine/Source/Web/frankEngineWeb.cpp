@@ -622,6 +622,18 @@ static EM_BOOL WebOnWheel(int eventType, const EmscriptenWheelEvent* e, void* us
 	return EM_TRUE;
 }
 
+// Right mouse is a game button (GB_Trigger2 and friends), so the browser's context menu
+// must never eat it - a right click that pops up a menu instead of firing is the single
+// most obvious way a web build feels broken. Registered here rather than in each game's
+// page so every Frank Engine web build gets it by default; the guard flag makes a second
+// call harmless. Canvas only, so right clicks on the page around the game still work.
+EM_JS(void, WebJsSuppressContextMenu, (), {
+	var c = document.getElementById("canvas");
+	if (!c || c.__frankNoContextMenu) return;
+	c.__frankNoContextMenu = 1;
+	c.addEventListener("contextmenu", function(e) { e.preventDefault(); }, false);
+});
+
 void FrankEngineLoop()
 {
 	printf("FrankEngineLoop (web) - starting main loop\n");
@@ -635,6 +647,7 @@ void FrankEngineLoop()
 	emscripten_set_mouseup_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, WebOnMouse);
 	emscripten_set_mousemove_callback("#canvas", NULL, EM_TRUE, WebOnMouse);
 	emscripten_set_wheel_callback("#canvas", NULL, EM_TRUE, WebOnWheel);
+	WebJsSuppressContextMenu();
 	emscripten_set_visibilitychange_callback(NULL, EM_TRUE, WebOnVisibilityChange);
 	// focus can leave for reasons visibilitychange never reports: alt-tab to another
 	// window, clicking the page outside the canvas, or an iframe host taking focus
