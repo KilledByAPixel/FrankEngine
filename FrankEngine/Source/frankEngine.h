@@ -30,7 +30,7 @@
 
 #define FRANK_ENGINE
 #define frankEngineName			(L"Frank Engine")
-#define frankEngineVersion		(L"0.843")
+#define frankEngineVersion		(L"0.85")
 
 // library includes
 #include <string>

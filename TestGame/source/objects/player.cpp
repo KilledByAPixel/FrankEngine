@@ -11,8 +11,9 @@
 #include "weapons.h"
 
 ConsoleCommandSimple(bool,		godMode,					false);
-ConsoleCommandSimple(bool,		playerKill,					false);
+ConsoleCommandSimple(bool,		playerFlashlightMelt,		false);
 ConsoleCommandSimple(bool,		playerAutopilot,			false);
+ConsoleCommandSimple(bool,		playerKill,					false);
 ConsoleCommandSimple(float,		playerMoveAccel,			100);
 ConsoleCommandSimple(float,		playerSideDrag,				0.3f);
 ConsoleCommandSimple(float,		playerMaxSpeed,				20);
@@ -164,7 +165,7 @@ void Player::Update()
 		Color c = light->GetColor();
 		c.a = isOn? 1.0f : 0.0f;
 		light->SetColor(c);
-		if (isOn)
+		if (isOn && playerFlashlightMelt)
 		{
 			// melt terrain
 			Vector2 startPos = light->GetPosWorld();
